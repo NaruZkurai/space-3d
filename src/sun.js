@@ -33,7 +33,10 @@ var QUERY_KEYS = [
   "imgSoftness",
   "imgAngle",
   "sunOffsetX",
-  "sunOffsetY"
+  "sunOffsetY",
+  "sunPosX",
+  "sunPosY",
+  "sunPosZ"
 ];
 
 // Rows that only make sense when the custom sun image is enabled.
@@ -95,6 +98,13 @@ module.exports = function(gui, params, menu, renderTextures) {
     params.sunOffsetX === undefined ? 0.0 : parseFloat(params.sunOffsetX);
   menu.sunOffsetY =
     params.sunOffsetY === undefined ? 0.0 : parseFloat(params.sunOffsetY);
+  // Sun's ABSOLUTE position on the sky (like the moon). 0 = seed spot.
+  menu.sunPosX =
+    params.sunPosX === undefined ? 0.0 : parseFloat(params.sunPosX);
+  menu.sunPosY =
+    params.sunPosY === undefined ? 0.0 : parseFloat(params.sunPosY);
+  menu.sunPosZ =
+    params.sunPosZ === undefined ? 0.0 : parseFloat(params.sunPosZ);
 
   gui
     .add(menu, "sunBrightness", 0, 5)
@@ -157,6 +167,21 @@ module.exports = function(gui, params, menu, renderTextures) {
   gui
     .add(menu, "sunOffsetY", -1, 1, 0.01)
     .name("Sun offset Y")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunPosX", -1, 1, 0.01)
+    .name("Sun pos X")
+    .listen()
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunPosY", -1, 1, 0.01)
+    .name("Sun pos Y")
+    .listen()
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunPosZ", -1, 1, 0.01)
+    .name("Sun pos Z")
+    .listen()
     .onChange(renderTextures);
 
   function updateImageControlsVisibility() {
@@ -254,7 +279,10 @@ module.exports = function(gui, params, menu, renderTextures) {
       imgSoftness: menu.imgSoftness,
       imgAngle: menu.imgAngle,
       sunOffsetX: menu.sunOffsetX,
-      sunOffsetY: menu.sunOffsetY
+      sunOffsetY: menu.sunOffsetY,
+      sunPosX: menu.sunPosX,
+      sunPosY: menu.sunPosY,
+      sunPosZ: menu.sunPosZ
     };
   }
 

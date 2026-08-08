@@ -18066,6 +18066,58 @@ window.onload = function() {
   // Sun controls (all logic lives in sun.js).
   var sun = Sun(gui, params, menu, renderTextures);
 
+  // ---- Sun <-> moon coordinate helpers ----------------
+  // Positions are absolute direction vectors (0,0,0 = use the seed spot).
+  // Reset reads the seed positions; set/swap copy them with a temp value.
+  function sunEffectivePos() {
+    if (menu.sunPosX !== 0 || menu.sunPosY !== 0 || menu.sunPosZ !== 0) {
+      return [menu.sunPosX, menu.sunPosY, menu.sunPosZ];
+    }
+    return Space3D.seedPositions(menu.seed).sun;
+  }
+  function moonEffectivePos() {
+    if (menu.moonOnSun) {
+      return sunEffectivePos();
+    }
+    if (menu.moonPosX !== 0 || menu.moonPosY !== 0 || menu.moonPosZ !== 0) {
+      return [menu.moonPosX, menu.moonPosY, menu.moonPosZ];
+    }
+    return Space3D.seedPositions(menu.seed).moon;
+  }
+  menu.resetToSeed = function() {
+    menu.sunPosX = 0;
+    menu.sunPosY = 0;
+    menu.sunPosZ = 0;
+    menu.moonOnSun = false;
+    menu.moonPosX = 0;
+    menu.moonPosY = 0;
+    menu.moonPosZ = 0;
+    renderTextures();
+  };
+  menu.setSunToMoon = function() {
+    var m = moonEffectivePos();
+    menu.sunPosX = m[0];
+    menu.sunPosY = m[1];
+    menu.sunPosZ = m[2];
+    renderTextures();
+  };
+  menu.swapSunMoon = function() {
+    var s = sunEffectivePos();
+    var m = moonEffectivePos();
+    var tmp = s; // temp storage value for the swap
+    menu.moonOnSun = false;
+    menu.moonPosX = tmp[0];
+    menu.moonPosY = tmp[1];
+    menu.moonPosZ = tmp[2];
+    menu.sunPosX = m[0];
+    menu.sunPosY = m[1];
+    menu.sunPosZ = m[2];
+    renderTextures();
+  };
+  gui.add(menu, "resetToSeed").name("Reset to seed");
+  gui.add(menu, "setSunToMoon").name("Set sun to moon");
+  gui.add(menu, "swapSunMoon").name("Swap sun / moon");
+
   document.body.appendChild(gui.domElement);
   gui.domElement.style.position = "fixed";
   gui.domElement.style.left = "16px";
@@ -18232,11 +18284,21 @@ window.onload = function() {
       imgAngle: sp.imgAngle,
       sunOffsetX: sp.sunOffsetX,
       sunOffsetY: sp.sunOffsetY,
+      sunPosX: sp.sunPosX,
+      sunPosY: sp.sunPosY,
+      sunPosZ: sp.sunPosZ,
       moonEnabled: mp.moonEnabled,
       moonScale: mp.moonScale,
       moonRx: mp.moonRx,
       moonRy: mp.moonRy,
-      moonRz: mp.moonRz
+      moonRz: mp.moonRz,
+      moonFlare: mp.moonFlare,
+      moonSoftness: mp.moonSoftness,
+      moonFlareColor: mp.moonFlareColor,
+      moonPosX: mp.moonPosX,
+      moonPosY: mp.moonPosY,
+      moonPosZ: mp.moonPosZ,
+      moonOnSun: mp.moonOnSun
     });
     skybox.setTextures(textures);
 
@@ -18333,7 +18395,42 @@ function generateRandomSeed() {
 // This module only owns the moon GUI + params. It must NOT require sun.js —
 // it reads/writes the shared `menu` object and hands params to main.js.
 
-var QUERY_KEYS = ["moonEnabled", "moonScale", "moonRx", "moonRy", "moonRz"];
+var QUERY_KEYS = [
+  "moonEnabled",
+  "moonScale",
+  "moonRx",
+  "moonRy",
+  "moonRz",
+  "moonFlare",
+  "moonSoftness",
+  "useMoonFlareColor",
+  "moonFlareHue",
+  "moonFlareSat",
+  "moonFlareLight",
+  "moonPosX",
+  "moonPosY",
+  "moonPosZ",
+  "moonOnSun"
+];
+
+// HSL -> [r, g, b] in 0..1, for the moon flare's own color.
+function hslToRgb(h, s, l) {
+  h = (((h % 360) + 360) % 360) / 360;
+  var hue2rgb = function(p, q, t) {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  if (s === 0) {
+    return [l, l, l];
+  }
+  var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  var p = 2 * l - q;
+  return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)];
+}
 
 module.exports = function(gui, params, menu, renderTextures) {
   menu.moonEnabled =
@@ -18343,6 +18440,39 @@ module.exports = function(gui, params, menu, renderTextures) {
   menu.moonRx = params.moonRx === undefined ? 0 : parseFloat(params.moonRx);
   menu.moonRy = params.moonRy === undefined ? 0 : parseFloat(params.moonRy);
   menu.moonRz = params.moonRz === undefined ? 0 : parseFloat(params.moonRz);
+  // Moon's own glow (rendered like the sun's flare, so it shows on every
+  // face) and edge smoothness (soft edge opacity on the sphere's limb).
+  menu.moonFlare =
+    params.moonFlare === undefined ? 0.27 : parseFloat(params.moonFlare);
+  menu.moonSoftness =
+    params.moonSoftness === undefined ? 0.3 : parseFloat(params.moonSoftness);
+  // Moon flare's OWN color (HSL), like the sun's flare color. Off by default
+  // -> white glow.
+  menu.useMoonFlareColor =
+    params.useMoonFlareColor === undefined
+      ? false
+      : params.useMoonFlareColor === "true";
+  menu.moonFlareHue =
+    params.moonFlareHue === undefined ? 0 : parseFloat(params.moonFlareHue);
+  menu.moonFlareSat =
+    params.moonFlareSat === undefined ? 1 : parseFloat(params.moonFlareSat);
+  menu.moonFlareLight =
+    params.moonFlareLight === undefined ? 1 : parseFloat(params.moonFlareLight);
+  // Moon's ABSOLUTE position on the sky — a direction vector from center
+  // (normalized when rendered). X/Y/Z reach any spot: left/right = +/-X,
+  // top/bottom = +/-Y, front/back = +/-Z.
+  menu.moonPosX =
+    params.moonPosX === undefined ? 0 : parseFloat(params.moonPosX);
+  menu.moonPosY =
+    params.moonPosY === undefined ? 0 : parseFloat(params.moonPosY);
+  menu.moonPosZ =
+    params.moonPosZ === undefined ? 0 : parseFloat(params.moonPosZ);
+  // Default position is the moon's OWN seed-determined spot (consistent with
+  // the original generator's sun/stars/galaxy — it regenerates when the seed
+  // changes). "Set coords to sun" flips moonOnSun so the moon sits on the
+  // sun; touching any absolute position clears it.
+  menu.moonOnSun =
+    params.moonOnSun === undefined ? false : params.moonOnSun === "true";
 
   gui
     .add(menu, "moonEnabled")
@@ -18364,6 +18494,88 @@ module.exports = function(gui, params, menu, renderTextures) {
     .add(menu, "moonRz", -180, 180, 1)
     .name("Moon rotate Z °")
     .onChange(renderTextures);
+  gui
+    .add(menu, "moonFlare", 0, 3, 0.01)
+    .name("Moon flare")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonSoftness", 0, 1, 0.01)
+    .name("Moon edge softness")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "useMoonFlareColor")
+    .name("Custom moon flare color")
+    .onChange(function() {
+      updateMoonFlareVisibility();
+      renderTextures();
+    });
+  gui
+    .add(menu, "moonFlareHue", 0, 360, 1)
+    .name("Moon flare hue °")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonFlareSat", 0, 1, 0.01)
+    .name("Moon flare saturation")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonFlareLight", 0, 1, 0.01)
+    .name("Moon flare lightness")
+    .onChange(renderTextures);
+  function updateMoonFlareVisibility() {
+    var show = !!menu.useMoonFlareColor;
+    var labels = [
+      "Moon flare hue °",
+      "Moon flare saturation",
+      "Moon flare lightness"
+    ];
+    Array.prototype.forEach.call(document.querySelectorAll("li"), function(li) {
+      var nameEl = li.querySelector(".property-name");
+      if (!nameEl) return;
+      if (labels.indexOf(nameEl.textContent) === -1) return;
+      li.style.display = show ? "" : "none";
+    });
+  }
+  requestAnimationFrame(updateMoonFlareVisibility);
+  gui
+    .add(menu, "moonPosX", -1, 1, 0.01)
+    .name("Moon pos X")
+    .listen()
+    .onChange(function() {
+      menu.moonOnSun = false;
+      renderTextures();
+    });
+  gui
+    .add(menu, "moonPosY", -1, 1, 0.01)
+    .name("Moon pos Y")
+    .listen()
+    .onChange(function() {
+      menu.moonOnSun = false;
+      renderTextures();
+    });
+  gui
+    .add(menu, "moonPosZ", -1, 1, 0.01)
+    .name("Moon pos Z")
+    .listen()
+    .onChange(function() {
+      menu.moonOnSun = false;
+      renderTextures();
+    });
+  menu.moonSetToSun = function() {
+    menu.moonOnSun = true;
+    menu.moonPosX = 0;
+    menu.moonPosY = 0;
+    menu.moonPosZ = 0;
+    renderTextures();
+  };
+  gui.add(menu, "moonSetToSun").name("Set coords to sun");
+  menu.moonRandomize = function() {
+    menu.moonOnSun = false;
+    menu.moonPosX = Math.random() * 2 - 1;
+    menu.moonPosY = Math.random() * 2 - 1;
+    menu.moonPosZ = Math.random() * 2 - 1;
+    renderTextures();
+  };
+  gui.add(menu, "moonRandomize").name("Randomize moon pos");
 
   // Moon-related params passed straight into space.render().
   function getRenderParams() {
@@ -18372,7 +18584,16 @@ module.exports = function(gui, params, menu, renderTextures) {
       moonScale: menu.moonScale,
       moonRx: menu.moonRx,
       moonRy: menu.moonRy,
-      moonRz: menu.moonRz
+      moonRz: menu.moonRz,
+      moonFlare: menu.moonFlare,
+      moonSoftness: menu.moonSoftness,
+      moonFlareColor: menu.useMoonFlareColor
+        ? hslToRgb(menu.moonFlareHue, menu.moonFlareSat, menu.moonFlareLight)
+        : null,
+      moonPosX: menu.moonPosX,
+      moonPosY: menu.moonPosY,
+      moonPosZ: menu.moonPosZ,
+      moonOnSun: menu.moonOnSun
     };
   }
 
@@ -18538,7 +18759,7 @@ module.exports = function() {
     );
     self.pMoon = util.loadProgram(
       self.gl,
-      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nattribute vec2 aUV;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 wp = uModel * vec4(aPosition, 1.0);\n    gl_Position = uProjection * uView * wp;\n    uv = aUV;\n    // Surface normal (rotation + uniform scale only; translation is dropped).\n    worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);\n    worldPos = wp.xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform sampler2D uTexture;\nuniform vec3 uLightDir;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\n\nvoid main() {\n    vec4 tex = texture2D(uTexture, uv);\n    // Diffuse lighting from uLightDir (full-moon: light comes from the\n    // viewer) plus a soft ambient so the dark limb isn't pure black. This\n    // is what makes it read as the real lit 3D moon render.\n    vec3 n = normalize(worldNormal);\n    float diff = max(dot(n, normalize(uLightDir)), 0.0);\n    float shade = 0.5 + 0.5 * diff;\n    gl_FragColor = vec4(tex.rgb * shade, tex.a);\n}\n"
+      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nattribute vec2 aUV;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 wp = uModel * vec4(aPosition, 1.0);\n    gl_Position = uProjection * uView * wp;\n    uv = aUV;\n    // Surface normal (rotation + uniform scale only; translation is dropped).\n    worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);\n    worldPos = wp.xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform sampler2D uTexture;\nuniform vec3 uLightDir;\nuniform float uSoftness;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 tex = texture2D(uTexture, uv);\n    // Diffuse lighting from uLightDir (full-moon: light comes from the\n    // viewer) plus a soft ambient so the dark limb isn't pure black. This\n    // is what makes it read as the real lit 3D moon render.\n    vec3 n = normalize(worldNormal);\n    float diff = max(dot(n, normalize(uLightDir)), 0.0);\n    float shade = 0.5 + 0.5 * diff;\n    // Edge opacity: the sphere's silhouette is where N.V -> 0 (the limb).\n    // Feather alpha there so the moon's edge fades softly instead of being\n    // a hard cut. uSoftness 0 = crisp edge, 1 = very soft.\n    vec3 v = normalize(-worldPos);\n    float ndv = max(dot(n, v), 0.0);\n    float feather = uSoftness * 0.25;\n    float edge = smoothstep(0.0, feather, ndv);\n    gl_FragColor = vec4(tex.rgb * shade, tex.a * edge);\n}\n"
     );
 
     // Create the point stars renderable.
@@ -18639,16 +18860,26 @@ module.exports = function() {
     var sunOffsetY =
       (params.sunOffsetY === undefined ? 0 : params.sunOffsetY) *
       SUN_OFFSET_SCALE;
+    // Sun's ABSOLUTE position override (like the moon's). 0 = seed spot.
+    var sunPosX =
+      params.sunPosX === undefined ? 0 : parseFloat(params.sunPosX);
+    var sunPosY =
+      params.sunPosY === undefined ? 0 : parseFloat(params.sunPosY);
+    var sunPosZ =
+      params.sunPosZ === undefined ? 0 : parseFloat(params.sunPosZ);
+    var hasSunAbs = sunPosX !== 0 || sunPosY !== 0 || sunPosZ !== 0;
     if (params.sun) {
       // Draw pos -> color -> size -> falloff from the seed in exactly the
-      // same order as always, so a given seed keeps the identical sun
-      // position / size / falloff. Only the visible color is overridden
-      // afterwards ("Custom sun color") — the seed generation is untouched.
-      var sunPos = randomVec3(rand);
+      // same order as always, so a given seed keeps the identical RNG stream
+      // (color / size / falloff are unchanged even when the position is
+      // overridden). Only the visible color / position are overridden
+      // afterwards — the seed generation is untouched.
+      var sunPosSeed = randomVec3(rand);
       var seededSunColor = [rand.random(), rand.random(), rand.random()];
       var sunSize =
         (rand.random() * 0.0001 + 0.0001) * (params.sunSize || 1);
       var sunFalloff = rand.random() * 16.0 + 8.0;
+      var sunPos = hasSunAbs ? [sunPosX, sunPosY, sunPosZ] : sunPosSeed;
       var renderedSunPos = [
         sunPos[0] + sunOffsetX,
         sunPos[1] + sunOffsetY,
@@ -18677,24 +18908,42 @@ module.exports = function() {
       });
     }
 
-    // 3D moon: a textured sphere baked into the cubemap, placed at the sun's
-    // (offset) position by default. Texture priority: a user custom image
+    // 3D moon: a textured sphere baked into the cubemap. It defaults to the
+    // sun's position but has its OWN offset (like the sun) — "Set coords to
+    // sun" resets it back onto the sun. Texture priority: a user custom image
     // (near-side photos get black -> transparent so they read as a disk),
     // otherwise the default NASA equirectangular moon map (opaque). The
     // rotate controls spin the actual 3D sphere — not a flat image.
     var moonImage = params.customImage || params.moonImage || null;
     var moonEnabled =
       params.moonEnabled === undefined ? false : !!params.moonEnabled;
+    // Moon's ABSOLUTE position on the sky — a direction vector from center
+    // (normalized before the sphere is placed). X/Y/Z reach any spot:
+    // left/right = +/-X, top/bottom = +/-Y, front/back = +/-Z. Priority:
+    //   1. moonOnSun  -> glued to the sun ("Set coords to sun")
+    //   2. moonPosXYZ -> absolute position
+    //   3. default    -> the moon's OWN seed-determined spot (consistent with
+    //                    the original generator's sun/stars/galaxy, so it
+    //                    regenerates when the seed changes)
+    var moonPosX =
+      params.moonPosX === undefined ? 0 : parseFloat(params.moonPosX);
+    var moonPosY =
+      params.moonPosY === undefined ? 0 : parseFloat(params.moonPosY);
+    var moonPosZ =
+      params.moonPosZ === undefined ? 0 : parseFloat(params.moonPosZ);
+    var hasMoonAbs = moonPosX !== 0 || moonPosY !== 0 || moonPosZ !== 0;
+    var moonOnSun = params.moonOnSun === true || params.moonOnSun === "true";
     var moonCenter = null;
     if (moonEnabled && moonImage) {
-      if (sunParams.length) {
-        // sunParams[0].pos is already "sun coords + offset".
-        moonCenter = sunParams[0].pos;
+      if (moonOnSun && sunParams.length) {
+        // Glued to the sun.
+        moonCenter = sunParams[0].pos.slice();
+      } else if (hasMoonAbs) {
+        moonCenter = [moonPosX, moonPosY, moonPosZ];
       } else {
-        var randMoon = new rng.MT(hashcode(params.seed) + 4000);
+        // The moon's own seed spot (distinct RNG stream from the sun's +4000).
+        var randMoon = new rng.MT(hashcode(params.seed) + 5000);
         moonCenter = randomVec3(randMoon);
-        moonCenter[0] += sunOffsetX;
-        moonCenter[1] += sunOffsetY;
       }
     }
 
@@ -18753,6 +19002,16 @@ module.exports = function() {
         };
       }
     }
+
+    // Moon edge/flare controls (read once per render). The edge softness is
+    // applied in the moon shader; the flare is rendered in the WebGL pass
+    // with the sun shader (like the sun's flare) so it shows correctly on
+    // every cubemap face.
+    var moonSoftness =
+      params.moonSoftness === undefined ? 0 : parseFloat(params.moonSoftness);
+    var moonFlare =
+      params.moonFlare === undefined ? 0.27 : parseFloat(params.moonFlare);
+    var moonFlareColor = params.moonFlareColor || [1, 1, 1];
 
     // Create a list of directions we'll be iterating over.
     var dirs = {
@@ -18884,6 +19143,33 @@ module.exports = function() {
         var dir = moonCenter.slice();
         glm.vec3.normalize(dir, dir);
 
+        // Render the moon's own flare (like the sun's): a soft glow at the
+        // moon's direction, drawn with the sun shader so it shows correctly
+        // on every face. The solid sphere (drawn next) covers the glow's
+        // center, leaving a halo around the moon.
+        if (moonFlare > 0) {
+          var moonAng = Math.asin(
+            Math.max(0, Math.min(moonRadius / MOON_DIST, 1))
+          );
+          // Scale the halo so it extends ~2x the moon's angular radius.
+          var moonFalloff = Math.log(0.15) / Math.log(Math.cos(2 * moonAng));
+          if (!isFinite(moonFalloff) || moonFalloff < 1) {
+            moonFalloff = 1;
+          }
+          self.pSun.use();
+          self.pSun.setUniform("uView", "Matrix4fv", false, view);
+          self.pSun.setUniform("uProjection", "Matrix4fv", false, projection);
+          self.pSun.setUniform("uModel", "Matrix4fv", false, model);
+          self.pSun.setUniform("uPosition", "3fv", dir);
+          self.pSun.setUniform("uColor", "3fv", [1, 1, 1]);
+          self.pSun.setUniform("uFlareColor", "3fv", moonFlareColor);
+          self.pSun.setUniform("uSize", "1f", 0.0001);
+          self.pSun.setUniform("uFalloff", "1f", moonFalloff);
+          self.pSun.setUniform("uBrightness", "1f", 1);
+          self.pSun.setUniform("uFlare", "1f", moonFlare);
+          self.rSun.render();
+        }
+
         var moonModel = glm.mat4.create();
         glm.mat4.translate(moonModel, moonModel, [
           dir[0] * MOON_DIST,
@@ -18913,6 +19199,7 @@ module.exports = function() {
           -dir[2]
         ]);
         self.pMoon.setUniform("uTexture", "1i", 0);
+        self.pMoon.setUniform("uSoftness", "1f", moonSoftness);
         moonTexture.bind();
         // The moon is a SOLID sphere, so it needs depth testing: otherwise the
         // far (back) hemisphere's triangles get drawn over the near hemisphere
@@ -18938,6 +19225,15 @@ module.exports = function() {
   };
 
   self.initialize();
+};
+
+// Deterministic seed positions for the sun and moon (same generation as the
+// render). Exposed so the GUI can reset / copy / swap their coordinates.
+module.exports.seedPositions = function(seed) {
+  return {
+    sun: randomVec3(new rng.MT(hashcode(seed) + 4000)),
+    moon: randomVec3(new rng.MT(hashcode(seed) + 5000))
+  };
 };
 
 // Compute the bounding box of the visible (non-black) content of an image,
@@ -19369,7 +19665,10 @@ var QUERY_KEYS = [
   "imgSoftness",
   "imgAngle",
   "sunOffsetX",
-  "sunOffsetY"
+  "sunOffsetY",
+  "sunPosX",
+  "sunPosY",
+  "sunPosZ"
 ];
 
 // Rows that only make sense when the custom sun image is enabled.
@@ -19431,6 +19730,13 @@ module.exports = function(gui, params, menu, renderTextures) {
     params.sunOffsetX === undefined ? 0.0 : parseFloat(params.sunOffsetX);
   menu.sunOffsetY =
     params.sunOffsetY === undefined ? 0.0 : parseFloat(params.sunOffsetY);
+  // Sun's ABSOLUTE position on the sky (like the moon). 0 = seed spot.
+  menu.sunPosX =
+    params.sunPosX === undefined ? 0.0 : parseFloat(params.sunPosX);
+  menu.sunPosY =
+    params.sunPosY === undefined ? 0.0 : parseFloat(params.sunPosY);
+  menu.sunPosZ =
+    params.sunPosZ === undefined ? 0.0 : parseFloat(params.sunPosZ);
 
   gui
     .add(menu, "sunBrightness", 0, 5)
@@ -19493,6 +19799,21 @@ module.exports = function(gui, params, menu, renderTextures) {
   gui
     .add(menu, "sunOffsetY", -1, 1, 0.01)
     .name("Sun offset Y")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunPosX", -1, 1, 0.01)
+    .name("Sun pos X")
+    .listen()
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunPosY", -1, 1, 0.01)
+    .name("Sun pos Y")
+    .listen()
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunPosZ", -1, 1, 0.01)
+    .name("Sun pos Z")
+    .listen()
     .onChange(renderTextures);
 
   function updateImageControlsVisibility() {
@@ -19590,7 +19911,10 @@ module.exports = function(gui, params, menu, renderTextures) {
       imgSoftness: menu.imgSoftness,
       imgAngle: menu.imgAngle,
       sunOffsetX: menu.sunOffsetX,
-      sunOffsetY: menu.sunOffsetY
+      sunOffsetY: menu.sunOffsetY,
+      sunPosX: menu.sunPosX,
+      sunPosY: menu.sunPosY,
+      sunPosZ: menu.sunPosZ
     };
   }
 

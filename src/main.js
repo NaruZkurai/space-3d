@@ -123,6 +123,58 @@ window.onload = function() {
   // Sun controls (all logic lives in sun.js).
   var sun = Sun(gui, params, menu, renderTextures);
 
+  // ---- Sun <-> moon coordinate helpers ----------------
+  // Positions are absolute direction vectors (0,0,0 = use the seed spot).
+  // Reset reads the seed positions; set/swap copy them with a temp value.
+  function sunEffectivePos() {
+    if (menu.sunPosX !== 0 || menu.sunPosY !== 0 || menu.sunPosZ !== 0) {
+      return [menu.sunPosX, menu.sunPosY, menu.sunPosZ];
+    }
+    return Space3D.seedPositions(menu.seed).sun;
+  }
+  function moonEffectivePos() {
+    if (menu.moonOnSun) {
+      return sunEffectivePos();
+    }
+    if (menu.moonPosX !== 0 || menu.moonPosY !== 0 || menu.moonPosZ !== 0) {
+      return [menu.moonPosX, menu.moonPosY, menu.moonPosZ];
+    }
+    return Space3D.seedPositions(menu.seed).moon;
+  }
+  menu.resetToSeed = function() {
+    menu.sunPosX = 0;
+    menu.sunPosY = 0;
+    menu.sunPosZ = 0;
+    menu.moonOnSun = false;
+    menu.moonPosX = 0;
+    menu.moonPosY = 0;
+    menu.moonPosZ = 0;
+    renderTextures();
+  };
+  menu.setSunToMoon = function() {
+    var m = moonEffectivePos();
+    menu.sunPosX = m[0];
+    menu.sunPosY = m[1];
+    menu.sunPosZ = m[2];
+    renderTextures();
+  };
+  menu.swapSunMoon = function() {
+    var s = sunEffectivePos();
+    var m = moonEffectivePos();
+    var tmp = s; // temp storage value for the swap
+    menu.moonOnSun = false;
+    menu.moonPosX = tmp[0];
+    menu.moonPosY = tmp[1];
+    menu.moonPosZ = tmp[2];
+    menu.sunPosX = m[0];
+    menu.sunPosY = m[1];
+    menu.sunPosZ = m[2];
+    renderTextures();
+  };
+  gui.add(menu, "resetToSeed").name("Reset to seed");
+  gui.add(menu, "setSunToMoon").name("Set sun to moon");
+  gui.add(menu, "swapSunMoon").name("Swap sun / moon");
+
   document.body.appendChild(gui.domElement);
   gui.domElement.style.position = "fixed";
   gui.domElement.style.left = "16px";
@@ -289,11 +341,21 @@ window.onload = function() {
       imgAngle: sp.imgAngle,
       sunOffsetX: sp.sunOffsetX,
       sunOffsetY: sp.sunOffsetY,
+      sunPosX: sp.sunPosX,
+      sunPosY: sp.sunPosY,
+      sunPosZ: sp.sunPosZ,
       moonEnabled: mp.moonEnabled,
       moonScale: mp.moonScale,
       moonRx: mp.moonRx,
       moonRy: mp.moonRy,
-      moonRz: mp.moonRz
+      moonRz: mp.moonRz,
+      moonFlare: mp.moonFlare,
+      moonSoftness: mp.moonSoftness,
+      moonFlareColor: mp.moonFlareColor,
+      moonPosX: mp.moonPosX,
+      moonPosY: mp.moonPosY,
+      moonPosZ: mp.moonPosZ,
+      moonOnSun: mp.moonOnSun
     });
     skybox.setTextures(textures);
 
