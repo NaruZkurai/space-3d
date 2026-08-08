@@ -120,14 +120,17 @@ module.exports = function(gui, params, menu, renderTextures) {
   gui
     .add(menu, "moonRx", 0, 360, 1)
     .name("Moon rotate X °")
+    .listen()
     .onChange(renderTextures);
   gui
     .add(menu, "moonRy", 0, 360, 1)
     .name("Moon rotate Y °")
+    .listen()
     .onChange(renderTextures);
   gui
     .add(menu, "moonRz", 0, 360, 1)
     .name("Moon rotate Z °")
+    .listen()
     .onChange(renderTextures);
   gui
     .add(menu, "moonFlare", 0, 3, 0.01)

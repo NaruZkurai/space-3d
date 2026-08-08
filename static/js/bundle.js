@@ -17963,6 +17963,43 @@ var resolution = 1024;
 // Used for the 3D moon sphere so "Show moon" works even with no custom image.
 var MOON_IMAGE_DEFAULT = "static/img/moon.jpg";
 
+function normDeg(v) {
+  return (((parseFloat(v) || 0) % 360) + 360) % 360;
+}
+
+// The moon orientation is stored as Euler angles (rotX*rotY*rotZ, degrees)
+// but is dragged as a quaternion so left-drag rotates it about the view's
+// screen axes (the same feel as the right-drag view rotation).
+function eulerToQuat(rx, ry, rz) {
+  var qx = glm.quat.create();
+  var qy = glm.quat.create();
+  var qz = glm.quat.create();
+  glm.quat.setAxisAngle(qx, [1, 0, 0], normDeg(rx) * Math.PI / 180);
+  glm.quat.setAxisAngle(qy, [0, 1, 0], normDeg(ry) * Math.PI / 180);
+  glm.quat.setAxisAngle(qz, [0, 0, 1], normDeg(rz) * Math.PI / 180);
+  var q = glm.quat.create();
+  glm.quat.mul(q, qx, qy);
+  glm.quat.mul(q, q, qz);
+  return q;
+}
+
+function quatToEuler(q) {
+  // Inverse of the above: R = Rx*Ry*Rz, q = qx*qy*qz. gl-matrix stores
+  // (x, y, z, w).
+  var x = q[0],
+    y = q[1],
+    z = q[2],
+    w = q[3];
+  var ry = Math.asin(Math.max(-1, Math.min(1, 2 * (x * z + y * w))));
+  var rx = Math.atan2(-2 * (y * z - w * x), 1 - 2 * (x * x + y * y));
+  var rz = Math.atan2(-2 * (x * y - w * z), 1 - 2 * (y * y + z * z));
+  return [
+    normDeg(rx * 180 / Math.PI),
+    normDeg(ry * 180 / Math.PI),
+    normDeg(rz * 180 / Math.PI)
+  ];
+}
+
 window.onload = function() {
   var params = qs.parse(location.hash);
 
@@ -18213,7 +18250,9 @@ window.onload = function() {
   var orientation = glm.quat.create();
   glm.quat.setAxisAngle(orientation, [0, 1, 0], -Math.PI / 2); // start facing +X
   var isRotating = false;
+  var isMoonRotating = false;
   var lastMouse = { x: 0, y: 0 };
+  var moonQ = eulerToQuat(menu.moonRx, menu.moonRy, menu.moonRz);
 
   // Keep the browser's right-click menu from popping up over the sky.
   renderCanvas.addEventListener("contextmenu", function(e) {
@@ -18222,16 +18261,29 @@ window.onload = function() {
 
   renderCanvas.addEventListener("mousedown", function(e) {
     if (e.button === 2) {
+      // Right-drag rotates the camera view.
       isRotating = true;
       lastMouse.x = e.clientX;
       lastMouse.y = e.clientY;
       renderCanvas.style.cursor = "grabbing";
+    } else if (e.button === 0) {
+      // Left-drag rotates the MOON independently of the view.
+      isMoonRotating = true;
+      lastMouse.x = e.clientX;
+      lastMouse.y = e.clientY;
+      renderCanvas.style.cursor = "grabbing";
+      // Capture the moon's current orientation so the drag accumulates from
+      // wherever the sliders / URL left it.
+      moonQ = eulerToQuat(menu.moonRx, menu.moonRy, menu.moonRz);
     }
   });
 
   window.addEventListener("mouseup", function(e) {
     if (e.button === 2) {
       isRotating = false;
+      renderCanvas.style.cursor = "grab";
+    } else if (e.button === 0) {
+      isMoonRotating = false;
       renderCanvas.style.cursor = "grab";
     }
   });
@@ -18257,6 +18309,30 @@ window.onload = function() {
       glm.quat.setAxisAngle(qPitch, right, -dy * 0.005);
       glm.quat.mul(q, qYaw, qPitch);
       glm.quat.mul(orientation, q, orientation);
+    } else if (isMoonRotating) {
+      var mdx = e.clientX - lastMouse.x;
+      var mdy = e.clientY - lastMouse.y;
+      lastMouse.x = e.clientX;
+      lastMouse.y = e.clientY;
+      // Left-drag rotates the MOON about the view's screen axes (same feel
+      // as the right-drag view rotation), tracked as a quaternion so it
+      // always rotates about the correct axis.
+      var mRight = glm.vec3.fromValues(1, 0, 0);
+      var mUp = glm.vec3.fromValues(0, 1, 0);
+      glm.vec3.transformQuat(mRight, mRight, orientation);
+      glm.vec3.transformQuat(mUp, mUp, orientation);
+      var mq = glm.quat.create();
+      var mqYaw = glm.quat.create();
+      var mqPitch = glm.quat.create();
+      glm.quat.setAxisAngle(mqYaw, mUp, -mdx * 0.005);
+      glm.quat.setAxisAngle(mqPitch, mRight, -mdy * 0.005);
+      glm.quat.mul(mq, mqYaw, mqPitch);
+      glm.quat.mul(moonQ, mq, moonQ);
+      var me = quatToEuler(moonQ);
+      menu.moonRx = me[0];
+      menu.moonRy = me[1];
+      menu.moonRz = me[2];
+      renderTextures();
     }
   });
 
@@ -18329,7 +18405,7 @@ window.onload = function() {
     }
 
     // Auto-orbit the sky when the user isn't manually rotating it.
-    if (!isRotating) {
+    if (!isRotating && !isMoonRotating) {
       var auto = glm.quat.create();
       glm.quat.setAxisAngle(auto, [0, 1, 0], 0.0025 * menu.animationSpeed);
       glm.quat.mul(orientation, auto, orientation);
@@ -18494,14 +18570,17 @@ module.exports = function(gui, params, menu, renderTextures) {
   gui
     .add(menu, "moonRx", 0, 360, 1)
     .name("Moon rotate X °")
+    .listen()
     .onChange(renderTextures);
   gui
     .add(menu, "moonRy", 0, 360, 1)
     .name("Moon rotate Y °")
+    .listen()
     .onChange(renderTextures);
   gui
     .add(menu, "moonRz", 0, 360, 1)
     .name("Moon rotate Z °")
+    .listen()
     .onChange(renderTextures);
   gui
     .add(menu, "moonFlare", 0, 3, 0.01)
