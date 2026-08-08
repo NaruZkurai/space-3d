@@ -137,7 +137,7 @@ module.exports = function() {
       sunParams.push({
         pos: randomVec3(rand),
         color: [rand.random(), rand.random(), rand.random()],
-        size: rand.random() * 0.0001 + 0.0001,
+        size: (rand.random() * 0.0001 + 0.0001) * (params.sunSize || 1),
         falloff: rand.random() * 16.0 + 8.0
       });
     }
@@ -245,6 +245,16 @@ module.exports = function() {
         self.pSun.setUniform("uColor", "3fv", sun.color);
         self.pSun.setUniform("uSize", "1f", sun.size);
         self.pSun.setUniform("uFalloff", "1f", sun.falloff);
+        self.pSun.setUniform(
+          "uBrightness",
+          "1f",
+          params.sunBrightness === undefined ? 1.0 : params.sunBrightness
+        );
+        self.pSun.setUniform(
+          "uFlare",
+          "1f",
+          params.sunFlare === undefined ? 0.5 : params.sunFlare
+        );
         self.rSun.render();
       }
 

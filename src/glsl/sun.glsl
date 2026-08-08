@@ -24,6 +24,8 @@ uniform vec3 uPosition;
 uniform vec3 uColor;
 uniform float uSize;
 uniform float uFalloff;
+uniform float uBrightness;
+uniform float uFlare;
 
 varying vec3 pos;
 
@@ -31,8 +33,8 @@ void main() {
     vec3 posn = normalize(pos);
     float d = clamp(dot(posn, normalize(uPosition)), 0.0, 1.0);
     float c = smoothstep(1.0 - uSize * 32.0, 1.0 - uSize, d);
-    c += pow(d, uFalloff) * 0.5;
+    c += pow(d, uFalloff) * uFlare;
     vec3 color = mix(uColor, vec3(1,1,1), c);
-    gl_FragColor = vec4(color, c);
+    gl_FragColor = vec4(color, c * uBrightness);
 
 }

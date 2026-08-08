@@ -34,6 +34,12 @@ window.onload = function() {
       params.animationSpeed === undefined
         ? 1.0
         : parseFloat(params.animationSpeed);
+    this.sunBrightness =
+      params.sunBrightness === undefined ? 1.0 : parseFloat(params.sunBrightness);
+    this.sunSize =
+      params.sunSize === undefined ? 1.0 : parseFloat(params.sunSize);
+    this.sunFlare =
+      params.sunFlare === undefined ? 0.5 : parseFloat(params.sunFlare);
     this.saveSkybox = function() {
       const zip = new JSZip();
       for (const name of ["front", "back", "left", "right", "top", "bottom"]) {
@@ -108,6 +114,18 @@ window.onload = function() {
     .name("Resolution")
     .onChange(renderTextures);
   gui.add(menu, "animationSpeed", 0, 10).name("Animation speed");
+  gui
+    .add(menu, "sunBrightness", 0, 5)
+    .name("Sun brightness")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunSize", 0.1, 8)
+    .name("Sun size")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunFlare", 0, 3)
+    .name("Sun flare")
+    .onChange(renderTextures);
   gui.add(menu, "saveSkybox").name("Download skybox");
 
   document.body.appendChild(gui.domElement);
@@ -150,7 +168,10 @@ window.onload = function() {
       sun: menu.sun,
       nebulae: menu.nebulae,
       resolution: menu.resolution,
-      animationSpeed: menu.animationSpeed
+      animationSpeed: menu.animationSpeed,
+      sunBrightness: menu.sunBrightness,
+      sunSize: menu.sunSize,
+      sunFlare: menu.sunFlare
     });
   }
 
@@ -169,6 +190,60 @@ window.onload = function() {
   var skybox = new Skybox(renderCanvas);
   var space = new Space3D(resolution);
 
+  // ---- Manual rotation: right-click + drag (trackball) ----
+  // A quaternion camera orientation: every drag increment rotates about the
+  // current screen axes, so panning up keeps panning up forever (no poles,
+  // no reversal).
+  var orientation = glm.quat.create();
+  glm.quat.setAxisAngle(orientation, [0, 1, 0], -Math.PI / 2); // start facing +X
+  var isRotating = false;
+  var lastMouse = { x: 0, y: 0 };
+
+  // Keep the browser's right-click menu from popping up over the sky.
+  renderCanvas.addEventListener("contextmenu", function(e) {
+    e.preventDefault();
+  });
+
+  renderCanvas.addEventListener("mousedown", function(e) {
+    if (e.button === 2) {
+      isRotating = true;
+      lastMouse.x = e.clientX;
+      lastMouse.y = e.clientY;
+      renderCanvas.style.cursor = "grabbing";
+    }
+  });
+
+  window.addEventListener("mouseup", function(e) {
+    if (e.button === 2) {
+      isRotating = false;
+      renderCanvas.style.cursor = "grab";
+    }
+  });
+
+  window.addEventListener("mousemove", function(e) {
+    if (isRotating) {
+      var dx = e.clientX - lastMouse.x;
+      var dy = e.clientY - lastMouse.y;
+      lastMouse.x = e.clientX;
+      lastMouse.y = e.clientY;
+
+      // Rotate about the current screen-up (dx) and screen-right (dy) axes.
+      // Dragging up always pans up — it never flips or reverses at the poles.
+      var right = glm.vec3.fromValues(1, 0, 0);
+      var up = glm.vec3.fromValues(0, 1, 0);
+      glm.vec3.transformQuat(right, right, orientation);
+      glm.vec3.transformQuat(up, up, orientation);
+
+      var q = glm.quat.create();
+      var qYaw = glm.quat.create();
+      var qPitch = glm.quat.create();
+      glm.quat.setAxisAngle(qYaw, up, -dx * 0.005);
+      glm.quat.setAxisAngle(qPitch, right, -dy * 0.005);
+      glm.quat.mul(q, qYaw, qPitch);
+      glm.quat.mul(orientation, q, orientation);
+    }
+  });
+
   function renderTextures() {
     var textures = space.render({
       seed: menu.seed,
@@ -176,7 +251,10 @@ window.onload = function() {
       stars: menu.stars,
       sun: menu.sun,
       nebulae: menu.nebulae,
-      resolution: menu.resolution
+      resolution: menu.resolution,
+      sunBrightness: menu.sunBrightness,
+      sunSize: menu.sunSize,
+      sunFlare: menu.sunFlare
     });
     skybox.setTextures(textures);
 
@@ -197,8 +275,6 @@ window.onload = function() {
 
   renderTextures();
 
-  var tick = 0.0;
-
   function render() {
     hideGui();
 
@@ -206,7 +282,12 @@ window.onload = function() {
       showGui();
     }
 
-    tick += 0.0025 * menu.animationSpeed;
+    // Auto-orbit the sky when the user isn't manually rotating it.
+    if (!isRotating) {
+      var auto = glm.quat.create();
+      glm.quat.setAxisAngle(auto, [0, 1, 0], 0.0025 * menu.animationSpeed);
+      glm.quat.mul(orientation, auto, orientation);
+    }
 
     var view = glm.mat4.create();
     var projection = glm.mat4.create();
@@ -214,12 +295,12 @@ window.onload = function() {
     renderCanvas.width = renderCanvas.clientWidth;
     renderCanvas.height = renderCanvas.clientHeight;
 
-    glm.mat4.lookAt(
-      view,
-      [0, 0, 0],
-      [Math.cos(tick), Math.sin(tick * 0.555), Math.sin(tick)],
-      [0, 1, 0]
-    );
+    // Build the view basis from the trackball orientation.
+    var fwd = glm.vec3.fromValues(0, 0, -1);
+    var up = glm.vec3.fromValues(0, 1, 0);
+    glm.vec3.transformQuat(fwd, fwd, orientation);
+    glm.vec3.transformQuat(up, up, orientation);
+    glm.mat4.lookAt(view, [0, 0, 0], fwd, up);
 
     var fov = (menu.fov / 360) * Math.PI * 2;
     glm.mat4.perspective(
