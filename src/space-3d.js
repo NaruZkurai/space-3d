@@ -300,7 +300,20 @@ module.exports = function() {
       params.moonSoftness === undefined ? 0 : parseFloat(params.moonSoftness);
     var moonFlare =
       params.moonFlare === undefined ? 0.27 : parseFloat(params.moonFlare);
-    var moonFlareColor = params.moonFlareColor || [1, 1, 1];
+    // Moon flare color: manual HSLA if provided, otherwise derived from the
+    // sun's final color hue-shifted by the moon flare hue offset (fmhslao).
+    var moonFlareColor;
+    if (params.moonFlareColor) {
+      moonFlareColor = params.moonFlareColor;
+    } else if (sunParams.length) {
+      var mho =
+        params.moonFlareHueOffset === undefined
+          ? 30
+          : parseFloat(params.moonFlareHueOffset);
+      moonFlareColor = hueShift(sunParams[0].color, mho);
+    } else {
+      moonFlareColor = [1, 1, 1];
+    }
 
     // Create a list of directions we'll be iterating over.
     var dirs = {
@@ -465,9 +478,13 @@ module.exports = function() {
           dir[1] * MOON_DIST,
           dir[2] * MOON_DIST
         ]);
-        glm.mat4.rotateX(moonModel, moonModel, (params.moonRx || 0) * toRad);
-        glm.mat4.rotateY(moonModel, moonModel, (params.moonRy || 0) * toRad);
-        glm.mat4.rotateZ(moonModel, moonModel, (params.moonRz || 0) * toRad);
+        // Rotations wrap at 360 (values normalized mod 360).
+        var norm360 = function(v) {
+          return (((parseFloat(v) || 0) % 360) + 360) % 360;
+        };
+        glm.mat4.rotateX(moonModel, moonModel, norm360(params.moonRx) * toRad);
+        glm.mat4.rotateY(moonModel, moonModel, norm360(params.moonRy) * toRad);
+        glm.mat4.rotateZ(moonModel, moonModel, norm360(params.moonRz) * toRad);
         glm.mat4.scale(moonModel, moonModel, [
           moonRadius,
           moonRadius,
@@ -489,6 +506,14 @@ module.exports = function() {
         ]);
         self.pMoon.setUniform("uTexture", "1i", 0);
         self.pMoon.setUniform("uSoftness", "1f", moonSoftness);
+        // Moon color follows the sun's final color, scaled by the flare alpha.
+        var moonTint = sunParams.length ? sunParams[0].color : [1, 1, 1];
+        var moonTintAmount =
+          params.moonFlareAlpha === undefined
+            ? 0.3
+            : parseFloat(params.moonFlareAlpha);
+        self.pMoon.setUniform("uMoonTint", "3fv", moonTint);
+        self.pMoon.setUniform("uMoonTintAmount", "1f", moonTintAmount);
         moonTexture.bind();
         // The moon is a SOLID sphere, so it needs depth testing: otherwise the
         // far (back) hemisphere's triangles get drawn over the near hemisphere

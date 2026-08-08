@@ -18125,12 +18125,8 @@ window.onload = function() {
 
   // The GUI is in the document now, so the sun module can hide its
   // image-only rows (custom sun image is off by default).
-  if (sun && sun.updateImageControlsVisibility) {
-    sun.updateImageControlsVisibility();
-  }
-  if (sun && sun.updateFlareColorVisibility) {
-    sun.updateFlareColorVisibility();
-  }
+  if (sun && sun.updateImageControlsVisibility) {sun.updateImageControlsVisibility();}
+  if (sun && sun.updateFlareColorVisibility) {sun.updateFlareColorVisibility();}
 
   function hideGui() {
     gui.domElement.style.display = "none";
@@ -18407,6 +18403,8 @@ var QUERY_KEYS = [
   "moonFlareHue",
   "moonFlareSat",
   "moonFlareLight",
+  "moonFlareAlpha",
+  "moonFlareHueOffset",
   "moonPosX",
   "moonPosY",
   "moonPosZ",
@@ -18458,6 +18456,17 @@ module.exports = function(gui, params, menu, renderTextures) {
     params.moonFlareSat === undefined ? 1 : parseFloat(params.moonFlareSat);
   menu.moonFlareLight =
     params.moonFlareLight === undefined ? 1 : parseFloat(params.moonFlareLight);
+  // Moon flare ALPHA: doesn't change the flare's rendered transparency — it
+  // controls how strongly the SUN's final color tints the moon sphere
+  // (fmhslaa).
+  menu.moonFlareAlpha =
+    params.moonFlareAlpha === undefined ? 0.3 : parseFloat(params.moonFlareAlpha);
+  // Default moon flare color = the sun's final color hue-shifted by this
+  // offset (fmhslao), used when the manual HSLA color is off.
+  menu.moonFlareHueOffset =
+    params.moonFlareHueOffset === undefined
+      ? 30
+      : parseFloat(params.moonFlareHueOffset);
   // Moon's ABSOLUTE position on the sky — a direction vector from center
   // (normalized when rendered). X/Y/Z reach any spot: left/right = +/-X,
   // top/bottom = +/-Y, front/back = +/-Z.
@@ -18483,15 +18492,15 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Moon scale")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRx", -180, 180, 1)
+    .add(menu, "moonRx", 0, 360, 1)
     .name("Moon rotate X °")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRy", -180, 180, 1)
+    .add(menu, "moonRy", 0, 360, 1)
     .name("Moon rotate Y °")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRz", -180, 180, 1)
+    .add(menu, "moonRz", 0, 360, 1)
     .name("Moon rotate Z °")
     .onChange(renderTextures);
   gui
@@ -18499,7 +18508,7 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Moon flare")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonSoftness", 0, 1, 0.01)
+    .add(menu, "moonSoftness", 0, 3, 0.01)
     .name("Moon edge softness")
     .onChange(renderTextures);
   gui
@@ -18521,18 +18530,30 @@ module.exports = function(gui, params, menu, renderTextures) {
     .add(menu, "moonFlareLight", 0, 1, 0.01)
     .name("Moon flare lightness")
     .onChange(renderTextures);
+  gui
+    .add(menu, "moonFlareAlpha", 0, 1, 0.01)
+    .name("Moon flare alpha (tint)")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonFlareHueOffset", 0, 360, 1)
+    .name("Moon flare hue offset °")
+    .onChange(renderTextures);
   function updateMoonFlareVisibility() {
-    var show = !!menu.useMoonFlareColor;
-    var labels = [
+    var manual = !!menu.useMoonFlareColor;
+    var manualLabels = [
       "Moon flare hue °",
       "Moon flare saturation",
       "Moon flare lightness"
     ];
+    var offsetLabels = ["Moon flare hue offset °"];
     Array.prototype.forEach.call(document.querySelectorAll("li"), function(li) {
       var nameEl = li.querySelector(".property-name");
       if (!nameEl) return;
-      if (labels.indexOf(nameEl.textContent) === -1) return;
-      li.style.display = show ? "" : "none";
+      if (manualLabels.indexOf(nameEl.textContent) !== -1) {
+        li.style.display = manual ? "" : "none";
+      } else if (offsetLabels.indexOf(nameEl.textContent) !== -1) {
+        li.style.display = manual ? "none" : "";
+      }
     });
   }
   requestAnimationFrame(updateMoonFlareVisibility);
@@ -18590,6 +18611,8 @@ module.exports = function(gui, params, menu, renderTextures) {
       moonFlareColor: menu.useMoonFlareColor
         ? hslToRgb(menu.moonFlareHue, menu.moonFlareSat, menu.moonFlareLight)
         : null,
+      moonFlareAlpha: menu.moonFlareAlpha,
+      moonFlareHueOffset: menu.moonFlareHueOffset,
       moonPosX: menu.moonPosX,
       moonPosY: menu.moonPosY,
       moonPosZ: menu.moonPosZ,
@@ -18759,7 +18782,7 @@ module.exports = function() {
     );
     self.pMoon = util.loadProgram(
       self.gl,
-      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nattribute vec2 aUV;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 wp = uModel * vec4(aPosition, 1.0);\n    gl_Position = uProjection * uView * wp;\n    uv = aUV;\n    // Surface normal (rotation + uniform scale only; translation is dropped).\n    worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);\n    worldPos = wp.xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform sampler2D uTexture;\nuniform vec3 uLightDir;\nuniform float uSoftness;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 tex = texture2D(uTexture, uv);\n    // Diffuse lighting from uLightDir (full-moon: light comes from the\n    // viewer) plus a soft ambient so the dark limb isn't pure black. This\n    // is what makes it read as the real lit 3D moon render.\n    vec3 n = normalize(worldNormal);\n    float diff = max(dot(n, normalize(uLightDir)), 0.0);\n    float shade = 0.5 + 0.5 * diff;\n    // Edge opacity: the sphere's silhouette is where N.V -> 0 (the limb).\n    // Feather alpha there so the moon's edge fades softly instead of being\n    // a hard cut. uSoftness 0 = crisp edge, 1 = very soft.\n    vec3 v = normalize(-worldPos);\n    float ndv = max(dot(n, v), 0.0);\n    float feather = uSoftness * 0.25;\n    float edge = smoothstep(0.0, feather, ndv);\n    gl_FragColor = vec4(tex.rgb * shade, tex.a * edge);\n}\n"
+      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nattribute vec2 aUV;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 wp = uModel * vec4(aPosition, 1.0);\n    gl_Position = uProjection * uView * wp;\n    uv = aUV;\n    // Surface normal (rotation + uniform scale only; translation is dropped).\n    worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);\n    worldPos = wp.xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform sampler2D uTexture;\nuniform vec3 uLightDir;\nuniform float uSoftness;\nuniform vec3 uMoonTint;\nuniform float uMoonTintAmount;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 tex = texture2D(uTexture, uv);\n    // Diffuse lighting from uLightDir (full-moon: light comes from the\n    // viewer) plus a soft ambient so the dark limb isn't pure black. This\n    // is what makes it read as the real lit 3D moon render.\n    vec3 n = normalize(worldNormal);\n    float diff = max(dot(n, normalize(uLightDir)), 0.0);\n    float shade = 0.5 + 0.5 * diff;\n    // Edge opacity: the sphere's silhouette is where N.V -> 0 (the limb).\n    // Feather alpha there so the moon's edge fades softly instead of being\n    // a hard cut. uSoftness 0 = crisp edge, 3 = very soft.\n    vec3 v = normalize(-worldPos);\n    float ndv = max(dot(n, v), 0.0);\n    float feather = uSoftness * 0.25;\n    float edge = smoothstep(0.0, feather, ndv);\n    // Moon color follows the sun's final color, scaled by the flare alpha.\n    vec3 tinted = mix(tex.rgb, uMoonTint, uMoonTintAmount);\n    gl_FragColor = vec4(tinted * shade, tex.a * edge);\n}\n"
     );
 
     // Create the point stars renderable.
@@ -19011,7 +19034,20 @@ module.exports = function() {
       params.moonSoftness === undefined ? 0 : parseFloat(params.moonSoftness);
     var moonFlare =
       params.moonFlare === undefined ? 0.27 : parseFloat(params.moonFlare);
-    var moonFlareColor = params.moonFlareColor || [1, 1, 1];
+    // Moon flare color: manual HSLA if provided, otherwise derived from the
+    // sun's final color hue-shifted by the moon flare hue offset (fmhslao).
+    var moonFlareColor;
+    if (params.moonFlareColor) {
+      moonFlareColor = params.moonFlareColor;
+    } else if (sunParams.length) {
+      var mho =
+        params.moonFlareHueOffset === undefined
+          ? 30
+          : parseFloat(params.moonFlareHueOffset);
+      moonFlareColor = hueShift(sunParams[0].color, mho);
+    } else {
+      moonFlareColor = [1, 1, 1];
+    }
 
     // Create a list of directions we'll be iterating over.
     var dirs = {
@@ -19176,9 +19212,13 @@ module.exports = function() {
           dir[1] * MOON_DIST,
           dir[2] * MOON_DIST
         ]);
-        glm.mat4.rotateX(moonModel, moonModel, (params.moonRx || 0) * toRad);
-        glm.mat4.rotateY(moonModel, moonModel, (params.moonRy || 0) * toRad);
-        glm.mat4.rotateZ(moonModel, moonModel, (params.moonRz || 0) * toRad);
+        // Rotations wrap at 360 (values normalized mod 360).
+        var norm360 = function(v) {
+          return (((parseFloat(v) || 0) % 360) + 360) % 360;
+        };
+        glm.mat4.rotateX(moonModel, moonModel, norm360(params.moonRx) * toRad);
+        glm.mat4.rotateY(moonModel, moonModel, norm360(params.moonRy) * toRad);
+        glm.mat4.rotateZ(moonModel, moonModel, norm360(params.moonRz) * toRad);
         glm.mat4.scale(moonModel, moonModel, [
           moonRadius,
           moonRadius,
@@ -19200,6 +19240,14 @@ module.exports = function() {
         ]);
         self.pMoon.setUniform("uTexture", "1i", 0);
         self.pMoon.setUniform("uSoftness", "1f", moonSoftness);
+        // Moon color follows the sun's final color, scaled by the flare alpha.
+        var moonTint = sunParams.length ? sunParams[0].color : [1, 1, 1];
+        var moonTintAmount =
+          params.moonFlareAlpha === undefined
+            ? 0.3
+            : parseFloat(params.moonFlareAlpha);
+        self.pMoon.setUniform("uMoonTint", "3fv", moonTint);
+        self.pMoon.setUniform("uMoonTintAmount", "1f", moonTintAmount);
         moonTexture.bind();
         // The moon is a SOLID sphere, so it needs depth testing: otherwise the
         // far (back) hemisphere's triangles get drawn over the near hemisphere

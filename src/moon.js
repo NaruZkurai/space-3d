@@ -29,6 +29,8 @@ var QUERY_KEYS = [
   "moonFlareHue",
   "moonFlareSat",
   "moonFlareLight",
+  "moonFlareAlpha",
+  "moonFlareHueOffset",
   "moonPosX",
   "moonPosY",
   "moonPosZ",
@@ -80,6 +82,17 @@ module.exports = function(gui, params, menu, renderTextures) {
     params.moonFlareSat === undefined ? 1 : parseFloat(params.moonFlareSat);
   menu.moonFlareLight =
     params.moonFlareLight === undefined ? 1 : parseFloat(params.moonFlareLight);
+  // Moon flare ALPHA: doesn't change the flare's rendered transparency — it
+  // controls how strongly the SUN's final color tints the moon sphere
+  // (fmhslaa).
+  menu.moonFlareAlpha =
+    params.moonFlareAlpha === undefined ? 0.3 : parseFloat(params.moonFlareAlpha);
+  // Default moon flare color = the sun's final color hue-shifted by this
+  // offset (fmhslao), used when the manual HSLA color is off.
+  menu.moonFlareHueOffset =
+    params.moonFlareHueOffset === undefined
+      ? 30
+      : parseFloat(params.moonFlareHueOffset);
   // Moon's ABSOLUTE position on the sky — a direction vector from center
   // (normalized when rendered). X/Y/Z reach any spot: left/right = +/-X,
   // top/bottom = +/-Y, front/back = +/-Z.
@@ -105,15 +118,15 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Moon scale")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRx", -180, 180, 1)
+    .add(menu, "moonRx", 0, 360, 1)
     .name("Moon rotate X °")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRy", -180, 180, 1)
+    .add(menu, "moonRy", 0, 360, 1)
     .name("Moon rotate Y °")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRz", -180, 180, 1)
+    .add(menu, "moonRz", 0, 360, 1)
     .name("Moon rotate Z °")
     .onChange(renderTextures);
   gui
@@ -121,7 +134,7 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Moon flare")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonSoftness", 0, 1, 0.01)
+    .add(menu, "moonSoftness", 0, 3, 0.01)
     .name("Moon edge softness")
     .onChange(renderTextures);
   gui
@@ -143,18 +156,30 @@ module.exports = function(gui, params, menu, renderTextures) {
     .add(menu, "moonFlareLight", 0, 1, 0.01)
     .name("Moon flare lightness")
     .onChange(renderTextures);
+  gui
+    .add(menu, "moonFlareAlpha", 0, 1, 0.01)
+    .name("Moon flare alpha (tint)")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonFlareHueOffset", 0, 360, 1)
+    .name("Moon flare hue offset °")
+    .onChange(renderTextures);
   function updateMoonFlareVisibility() {
-    var show = !!menu.useMoonFlareColor;
-    var labels = [
+    var manual = !!menu.useMoonFlareColor;
+    var manualLabels = [
       "Moon flare hue °",
       "Moon flare saturation",
       "Moon flare lightness"
     ];
+    var offsetLabels = ["Moon flare hue offset °"];
     Array.prototype.forEach.call(document.querySelectorAll("li"), function(li) {
       var nameEl = li.querySelector(".property-name");
       if (!nameEl) return;
-      if (labels.indexOf(nameEl.textContent) === -1) return;
-      li.style.display = show ? "" : "none";
+      if (manualLabels.indexOf(nameEl.textContent) !== -1) {
+        li.style.display = manual ? "" : "none";
+      } else if (offsetLabels.indexOf(nameEl.textContent) !== -1) {
+        li.style.display = manual ? "none" : "";
+      }
     });
   }
   requestAnimationFrame(updateMoonFlareVisibility);
@@ -212,6 +237,8 @@ module.exports = function(gui, params, menu, renderTextures) {
       moonFlareColor: menu.useMoonFlareColor
         ? hslToRgb(menu.moonFlareHue, menu.moonFlareSat, menu.moonFlareLight)
         : null,
+      moonFlareAlpha: menu.moonFlareAlpha,
+      moonFlareHueOffset: menu.moonFlareHueOffset,
       moonPosX: menu.moonPosX,
       moonPosY: menu.moonPosY,
       moonPosZ: menu.moonPosZ,

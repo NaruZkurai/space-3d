@@ -182,12 +182,8 @@ window.onload = function() {
 
   // The GUI is in the document now, so the sun module can hide its
   // image-only rows (custom sun image is off by default).
-  if (sun && sun.updateImageControlsVisibility) {
-    sun.updateImageControlsVisibility();
-  }
-  if (sun && sun.updateFlareColorVisibility) {
-    sun.updateFlareColorVisibility();
-  }
+  if (sun && sun.updateImageControlsVisibility) {sun.updateImageControlsVisibility();}
+  if (sun && sun.updateFlareColorVisibility) {sun.updateFlareColorVisibility();}
 
   function hideGui() {
     gui.domElement.style.display = "none";
