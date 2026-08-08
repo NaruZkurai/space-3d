@@ -10,8 +10,15 @@ var saveAs = require("filesaver.js").saveAs;
 var JSZip = require("jszip");
 var Space3D = require("./space-3d.js");
 var Skybox = require("./skybox.js");
+var Moon = require("./moon.js");
+var Sun = require("./sun.js");
 
 var resolution = 1024;
+
+// Default moon texture: the REAL NASA moon model's equirectangular map,
+// extracted from https://solarsystem.nasa.gov/gltf_embed/2366/ (Moon_1_3474).
+// Used for the 3D moon sphere so "Show moon" works even with no custom image.
+var MOON_IMAGE_DEFAULT = "static/img/moon.jpg";
 
 window.onload = function() {
   var params = qs.parse(location.hash);
@@ -32,14 +39,8 @@ window.onload = function() {
     this.resolution = parseInt(params.resolution) || 1024;
     this.animationSpeed =
       params.animationSpeed === undefined
-        ? 1.0
+        ? 0.0
         : parseFloat(params.animationSpeed);
-    this.sunBrightness =
-      params.sunBrightness === undefined ? 1.0 : parseFloat(params.sunBrightness);
-    this.sunSize =
-      params.sunSize === undefined ? 1.0 : parseFloat(params.sunSize);
-    this.sunFlare =
-      params.sunFlare === undefined ? 0.5 : parseFloat(params.sunFlare);
     this.saveSkybox = function() {
       const zip = new JSZip();
       for (const name of ["front", "back", "left", "right", "top", "bottom"]) {
@@ -114,24 +115,27 @@ window.onload = function() {
     .name("Resolution")
     .onChange(renderTextures);
   gui.add(menu, "animationSpeed", 0, 10).name("Animation speed");
-  gui
-    .add(menu, "sunBrightness", 0, 5)
-    .name("Sun brightness")
-    .onChange(renderTextures);
-  gui
-    .add(menu, "sunSize", 0.1, 8)
-    .name("Sun size")
-    .onChange(renderTextures);
-  gui
-    .add(menu, "sunFlare", 0, 3)
-    .name("Sun flare")
-    .onChange(renderTextures);
   gui.add(menu, "saveSkybox").name("Download skybox");
+
+  // Moon (all logic lives in moon.js).
+  var moon = Moon(gui, params, menu, renderTextures);
+
+  // Sun controls (all logic lives in sun.js).
+  var sun = Sun(gui, params, menu, renderTextures);
 
   document.body.appendChild(gui.domElement);
   gui.domElement.style.position = "fixed";
   gui.domElement.style.left = "16px";
   gui.domElement.style.top = "272px";
+
+  // The GUI is in the document now, so the sun module can hide its
+  // image-only rows (custom sun image is off by default).
+  if (sun && sun.updateImageControlsVisibility) {
+    sun.updateImageControlsVisibility();
+  }
+  if (sun && sun.updateFlareColorVisibility) {
+    sun.updateFlareColorVisibility();
+  }
 
   function hideGui() {
     gui.domElement.style.display = "none";
@@ -160,7 +164,7 @@ window.onload = function() {
   }
 
   function setQueryString() {
-    location.hash = qs.stringify({
+    var q = {
       seed: menu.seed,
       fov: menu.fov,
       pointStars: menu.pointStars,
@@ -168,11 +172,19 @@ window.onload = function() {
       sun: menu.sun,
       nebulae: menu.nebulae,
       resolution: menu.resolution,
-      animationSpeed: menu.animationSpeed,
-      sunBrightness: menu.sunBrightness,
-      sunSize: menu.sunSize,
-      sunFlare: menu.sunFlare
-    });
+      animationSpeed: menu.animationSpeed
+    };
+    if (sun) {
+      sun.queryKeys.forEach(function(key) {
+        q[key] = menu[key];
+      });
+    }
+    if (moon) {
+      moon.queryKeys.forEach(function(key) {
+        q[key] = menu[key];
+      });
+    }
+    location.hash = qs.stringify(q);
   }
 
   var hideControls = false;
@@ -189,6 +201,19 @@ window.onload = function() {
 
   var skybox = new Skybox(renderCanvas);
   var space = new Space3D(resolution);
+
+  // Preload the default NASA moon texture. Re-render once it's ready so the
+  // moon shows up under "Show moon" even without a custom image.
+  var defaultMoonImage = null;
+  (function loadDefaultMoon() {
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function() {
+      defaultMoonImage = img;
+      renderTextures();
+    };
+    img.src = MOON_IMAGE_DEFAULT;
+  })();
 
   // ---- Manual rotation: right-click + drag (trackball) ----
   // A quaternion camera orientation: every drag increment rotates about the
@@ -244,7 +269,9 @@ window.onload = function() {
     }
   });
 
-  function renderTextures() {
+  function renderTexturesWithImage(customImage) {
+    var sp = sun.getRenderParams();
+    var mp = moon.getRenderParams();
     var textures = space.render({
       seed: menu.seed,
       pointStars: menu.pointStars,
@@ -252,9 +279,21 @@ window.onload = function() {
       sun: menu.sun,
       nebulae: menu.nebulae,
       resolution: menu.resolution,
-      sunBrightness: menu.sunBrightness,
-      sunSize: menu.sunSize,
-      sunFlare: menu.sunFlare
+      customImage: customImage,
+      moonImage: defaultMoonImage,
+      sunBrightness: sp.sunBrightness,
+      sunSize: sp.sunSize,
+      sunFlare: sp.sunFlare,
+      sunColor: sp.sunColor,
+      imgSoftness: sp.imgSoftness,
+      imgAngle: sp.imgAngle,
+      sunOffsetX: sp.sunOffsetX,
+      sunOffsetY: sp.sunOffsetY,
+      moonEnabled: mp.moonEnabled,
+      moonScale: mp.moonScale,
+      moonRx: mp.moonRx,
+      moonRy: mp.moonRy,
+      moonRz: mp.moonRz
     });
     skybox.setTextures(textures);
 
@@ -271,6 +310,12 @@ window.onload = function() {
     drawIndividual(textures.back, "texture-back");
     drawIndividual(textures.top, "texture-top");
     drawIndividual(textures.bottom, "texture-bottom");
+  }
+
+  function renderTextures() {
+    sun.getCustomImage(function(img) {
+      renderTexturesWithImage(img);
+    });
   }
 
   renderTextures();

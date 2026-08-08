@@ -17953,8 +17953,15 @@ var saveAs = require("filesaver.js").saveAs;
 var JSZip = require("jszip");
 var Space3D = require("./space-3d.js");
 var Skybox = require("./skybox.js");
+var Moon = require("./moon.js");
+var Sun = require("./sun.js");
 
 var resolution = 1024;
+
+// Default moon texture: the REAL NASA moon model's equirectangular map,
+// extracted from https://solarsystem.nasa.gov/gltf_embed/2366/ (Moon_1_3474).
+// Used for the 3D moon sphere so "Show moon" works even with no custom image.
+var MOON_IMAGE_DEFAULT = "static/img/moon.jpg";
 
 window.onload = function() {
   var params = qs.parse(location.hash);
@@ -17975,14 +17982,8 @@ window.onload = function() {
     this.resolution = parseInt(params.resolution) || 1024;
     this.animationSpeed =
       params.animationSpeed === undefined
-        ? 1.0
+        ? 0.0
         : parseFloat(params.animationSpeed);
-    this.sunBrightness =
-      params.sunBrightness === undefined ? 1.0 : parseFloat(params.sunBrightness);
-    this.sunSize =
-      params.sunSize === undefined ? 1.0 : parseFloat(params.sunSize);
-    this.sunFlare =
-      params.sunFlare === undefined ? 0.5 : parseFloat(params.sunFlare);
     this.saveSkybox = function() {
       const zip = new JSZip();
       for (const name of ["front", "back", "left", "right", "top", "bottom"]) {
@@ -18057,24 +18058,27 @@ window.onload = function() {
     .name("Resolution")
     .onChange(renderTextures);
   gui.add(menu, "animationSpeed", 0, 10).name("Animation speed");
-  gui
-    .add(menu, "sunBrightness", 0, 5)
-    .name("Sun brightness")
-    .onChange(renderTextures);
-  gui
-    .add(menu, "sunSize", 0.1, 8)
-    .name("Sun size")
-    .onChange(renderTextures);
-  gui
-    .add(menu, "sunFlare", 0, 3)
-    .name("Sun flare")
-    .onChange(renderTextures);
   gui.add(menu, "saveSkybox").name("Download skybox");
+
+  // Moon (all logic lives in moon.js).
+  var moon = Moon(gui, params, menu, renderTextures);
+
+  // Sun controls (all logic lives in sun.js).
+  var sun = Sun(gui, params, menu, renderTextures);
 
   document.body.appendChild(gui.domElement);
   gui.domElement.style.position = "fixed";
   gui.domElement.style.left = "16px";
   gui.domElement.style.top = "272px";
+
+  // The GUI is in the document now, so the sun module can hide its
+  // image-only rows (custom sun image is off by default).
+  if (sun && sun.updateImageControlsVisibility) {
+    sun.updateImageControlsVisibility();
+  }
+  if (sun && sun.updateFlareColorVisibility) {
+    sun.updateFlareColorVisibility();
+  }
 
   function hideGui() {
     gui.domElement.style.display = "none";
@@ -18103,7 +18107,7 @@ window.onload = function() {
   }
 
   function setQueryString() {
-    location.hash = qs.stringify({
+    var q = {
       seed: menu.seed,
       fov: menu.fov,
       pointStars: menu.pointStars,
@@ -18111,11 +18115,19 @@ window.onload = function() {
       sun: menu.sun,
       nebulae: menu.nebulae,
       resolution: menu.resolution,
-      animationSpeed: menu.animationSpeed,
-      sunBrightness: menu.sunBrightness,
-      sunSize: menu.sunSize,
-      sunFlare: menu.sunFlare
-    });
+      animationSpeed: menu.animationSpeed
+    };
+    if (sun) {
+      sun.queryKeys.forEach(function(key) {
+        q[key] = menu[key];
+      });
+    }
+    if (moon) {
+      moon.queryKeys.forEach(function(key) {
+        q[key] = menu[key];
+      });
+    }
+    location.hash = qs.stringify(q);
   }
 
   var hideControls = false;
@@ -18132,6 +18144,19 @@ window.onload = function() {
 
   var skybox = new Skybox(renderCanvas);
   var space = new Space3D(resolution);
+
+  // Preload the default NASA moon texture. Re-render once it's ready so the
+  // moon shows up under "Show moon" even without a custom image.
+  var defaultMoonImage = null;
+  (function loadDefaultMoon() {
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function() {
+      defaultMoonImage = img;
+      renderTextures();
+    };
+    img.src = MOON_IMAGE_DEFAULT;
+  })();
 
   // ---- Manual rotation: right-click + drag (trackball) ----
   // A quaternion camera orientation: every drag increment rotates about the
@@ -18187,7 +18212,9 @@ window.onload = function() {
     }
   });
 
-  function renderTextures() {
+  function renderTexturesWithImage(customImage) {
+    var sp = sun.getRenderParams();
+    var mp = moon.getRenderParams();
     var textures = space.render({
       seed: menu.seed,
       pointStars: menu.pointStars,
@@ -18195,9 +18222,21 @@ window.onload = function() {
       sun: menu.sun,
       nebulae: menu.nebulae,
       resolution: menu.resolution,
-      sunBrightness: menu.sunBrightness,
-      sunSize: menu.sunSize,
-      sunFlare: menu.sunFlare
+      customImage: customImage,
+      moonImage: defaultMoonImage,
+      sunBrightness: sp.sunBrightness,
+      sunSize: sp.sunSize,
+      sunFlare: sp.sunFlare,
+      sunColor: sp.sunColor,
+      imgSoftness: sp.imgSoftness,
+      imgAngle: sp.imgAngle,
+      sunOffsetX: sp.sunOffsetX,
+      sunOffsetY: sp.sunOffsetY,
+      moonEnabled: mp.moonEnabled,
+      moonScale: mp.moonScale,
+      moonRx: mp.moonRx,
+      moonRy: mp.moonRy,
+      moonRz: mp.moonRz
     });
     skybox.setTextures(textures);
 
@@ -18214,6 +18253,12 @@ window.onload = function() {
     drawIndividual(textures.back, "texture-back");
     drawIndividual(textures.top, "texture-top");
     drawIndividual(textures.bottom, "texture-bottom");
+  }
+
+  function renderTextures() {
+    sun.getCustomImage(function(img) {
+      renderTexturesWithImage(img);
+    });
   }
 
   renderTextures();
@@ -18268,7 +18313,76 @@ function generateRandomSeed() {
   return (Math.random() * 1000000000000000000).toString(36);
 }
 ``
-},{"./skybox.js":94,"./space-3d.js":95,"filesaver.js":6,"gl-matrix":7,"jszip":22,"query-string":67}],94:[function(require,module,exports){
+},{"./moon.js":94,"./skybox.js":95,"./space-3d.js":96,"./sun.js":97,"filesaver.js":6,"gl-matrix":7,"jszip":22,"query-string":67}],94:[function(require,module,exports){
+// jshint -W097
+// jshint undef: true, unused: true
+/* globals module*/
+
+"use strict";
+
+// Moon (3D sphere baked into the cubemap)
+// ---------------------------------------
+// The moon is rendered by space-3d.js as a real 3D textured sphere inside the
+// WebGL cubemap pass, so it is baked into the skybox and shows up in the
+// exported textures. It sits at the sun's position (seed coords + offset) and
+// the moon rotate controls spin the actual 3D sphere — not a flat image.
+//
+// The sphere's texture is the "custom sun image" (e.g. a moon photo): sun.js
+// loads it and main.js passes the resolved <img> through to space.render().
+//
+// This module only owns the moon GUI + params. It must NOT require sun.js —
+// it reads/writes the shared `menu` object and hands params to main.js.
+
+var QUERY_KEYS = ["moonEnabled", "moonScale", "moonRx", "moonRy", "moonRz"];
+
+module.exports = function(gui, params, menu, renderTextures) {
+  menu.moonEnabled =
+    params.moonEnabled === undefined ? true : params.moonEnabled === "true";
+  menu.moonScale =
+    params.moonScale === undefined ? 1 : parseFloat(params.moonScale);
+  menu.moonRx = params.moonRx === undefined ? 0 : parseFloat(params.moonRx);
+  menu.moonRy = params.moonRy === undefined ? 0 : parseFloat(params.moonRy);
+  menu.moonRz = params.moonRz === undefined ? 0 : parseFloat(params.moonRz);
+
+  gui
+    .add(menu, "moonEnabled")
+    .name("Show moon")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonScale", 0.1, 8, 0.01)
+    .name("Moon scale")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonRx", -180, 180, 1)
+    .name("Moon rotate X °")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonRy", -180, 180, 1)
+    .name("Moon rotate Y °")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "moonRz", -180, 180, 1)
+    .name("Moon rotate Z °")
+    .onChange(renderTextures);
+
+  // Moon-related params passed straight into space.render().
+  function getRenderParams() {
+    return {
+      moonEnabled: menu.moonEnabled,
+      moonScale: menu.moonScale,
+      moonRx: menu.moonRx,
+      moonRy: menu.moonRy,
+      moonRz: menu.moonRz
+    };
+  }
+
+  return {
+    queryKeys: QUERY_KEYS,
+    getRenderParams: getRenderParams
+  };
+};
+
+},{}],95:[function(require,module,exports){
 // jshint -W097
 // jshint undef: true, unused: true
 /* globals require,__dirname,Float32Array,module*/
@@ -18373,7 +18487,7 @@ function buildQuad(gl, program) {
     return renderable;
 }
 
-},{"./util.js":96,"./webgl.js":97,"gl-matrix":7}],95:[function(require,module,exports){
+},{"./util.js":98,"./webgl.js":99,"gl-matrix":7}],96:[function(require,module,exports){
 // jshint -W097
 // jshint undef: true, unused: true
 /* globals require,document,__dirname,Float32Array,module*/
@@ -18420,7 +18534,11 @@ module.exports = function() {
     );
     self.pSun = util.loadProgram(
       self.gl,
-      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nvarying vec3 pos;\n\nvoid main() {\n    gl_Position = uProjection * uView * uModel * vec4(aPosition, 1);\n    pos = (uModel * vec4(aPosition, 1)).xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform vec3 uPosition;\nuniform vec3 uColor;\nuniform float uSize;\nuniform float uFalloff;\nuniform float uBrightness;\nuniform float uFlare;\n\nvarying vec3 pos;\n\nvoid main() {\n    vec3 posn = normalize(pos);\n    float d = clamp(dot(posn, normalize(uPosition)), 0.0, 1.0);\n    float c = smoothstep(1.0 - uSize * 32.0, 1.0 - uSize, d);\n    c += pow(d, uFalloff) * uFlare;\n    vec3 color = mix(uColor, vec3(1,1,1), c);\n    gl_FragColor = vec4(color, c * uBrightness);\n\n}\n"
+      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nvarying vec3 pos;\n\nvoid main() {\n    gl_Position = uProjection * uView * uModel * vec4(aPosition, 1);\n    pos = (uModel * vec4(aPosition, 1)).xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform vec3 uPosition;\nuniform vec3 uColor;       // star (disk) color\nuniform vec3 uFlareColor;  // flare color\nuniform float uSize;\nuniform float uFalloff;\nuniform float uBrightness;\nuniform float uFlare;\n\nvarying vec3 pos;\n\nvoid main() {\n    vec3 posn = normalize(pos);\n    float d = clamp(dot(posn, normalize(uPosition)), 0.0, 1.0);\n    float disk = smoothstep(1.0 - uSize * 32.0, 1.0 - uSize, d);\n    float flare = pow(d, uFalloff) * uFlare;\n    // Star core: uColor at the rim fading to white-hot at the very center.\n    vec3 starColor = mix(uColor, vec3(1, 1, 1), disk);\n    // The flare keeps its own color; blend over to the star color on the disk.\n    vec3 color = mix(uFlareColor, starColor, disk);\n    float a = (disk + flare) * uBrightness;\n    gl_FragColor = vec4(color, a);\n}\n"
+    );
+    self.pMoon = util.loadProgram(
+      self.gl,
+      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nattribute vec2 aUV;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 wp = uModel * vec4(aPosition, 1.0);\n    gl_Position = uProjection * uView * wp;\n    uv = aUV;\n    // Surface normal (rotation + uniform scale only; translation is dropped).\n    worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);\n    worldPos = wp.xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform sampler2D uTexture;\nuniform vec3 uLightDir;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\n\nvoid main() {\n    vec4 tex = texture2D(uTexture, uv);\n    // Diffuse lighting from uLightDir (full-moon: light comes from the\n    // viewer) plus a soft ambient so the dark limb isn't pure black. This\n    // is what makes it read as the real lit 3D moon render.\n    vec3 n = normalize(worldNormal);\n    float diff = max(dot(n, normalize(uLightDir)), 0.0);\n    float shade = 0.5 + 0.5 * diff;\n    gl_FragColor = vec4(tex.rgb * shade, tex.a);\n}\n"
     );
 
     // Create the point stars renderable.
@@ -18445,10 +18563,11 @@ module.exports = function() {
       count
     );
 
-    // Create the nebula, sun, and star renderables.
+    // Create the nebula, sun, star, and moon renderables.
     self.rNebula = buildBox(self.gl, self.pNebula);
     self.rSun = buildBox(self.gl, self.pSun);
     self.rStar = buildBox(self.gl, self.pStar);
+    self.rMoon = buildSphere(self.gl, self.pMoon, 32);
   };
 
   self.render = function(params) {
@@ -18509,13 +18628,130 @@ module.exports = function() {
     // Initialize the sun parameters.
     var rand = new rng.MT(hashcode(params.seed) + 4000);
     var sunParams = [];
+    // Sun offset: nudges the sun (and its flare) in world space. The shader
+    // normalizes uPosition, so offsetting the vector shifts the flare's
+    // direction; the custom image is drawn at the same offset position.
+    // moon.js uses the same scale to keep its overlay glued to the sun.
+    var SUN_OFFSET_SCALE = 0.5;
+    var sunOffsetX =
+      (params.sunOffsetX === undefined ? 0 : params.sunOffsetX) *
+      SUN_OFFSET_SCALE;
+    var sunOffsetY =
+      (params.sunOffsetY === undefined ? 0 : params.sunOffsetY) *
+      SUN_OFFSET_SCALE;
     if (params.sun) {
+      // Draw pos -> color -> size -> falloff from the seed in exactly the
+      // same order as always, so a given seed keeps the identical sun
+      // position / size / falloff. Only the visible color is overridden
+      // afterwards ("Custom sun color") — the seed generation is untouched.
+      var sunPos = randomVec3(rand);
+      var seededSunColor = [rand.random(), rand.random(), rand.random()];
+      var sunSize =
+        (rand.random() * 0.0001 + 0.0001) * (params.sunSize || 1);
+      var sunFalloff = rand.random() * 16.0 + 8.0;
+      var renderedSunPos = [
+        sunPos[0] + sunOffsetX,
+        sunPos[1] + sunOffsetY,
+        sunPos[2]
+      ];
+      // Star color ("Custom sun color") tints the disk only.
+      var starColor = params.sunColor || seededSunColor;
+      // Flare color: its own color by default linked to the star color with
+      // a chroma (hue) offset; a custom flare color can override it.
+      var flareHueOffset =
+        params.flareHueOffset === undefined
+          ? 30
+          : parseFloat(params.flareHueOffset);
+      var flareColor;
+      if (params.useFlareColor && params.flareColor) {
+        flareColor = params.flareColor;
+      } else {
+        flareColor = hueShift(starColor, flareHueOffset);
+      }
       sunParams.push({
-        pos: randomVec3(rand),
-        color: [rand.random(), rand.random(), rand.random()],
-        size: (rand.random() * 0.0001 + 0.0001) * (params.sunSize || 1),
-        falloff: rand.random() * 16.0 + 8.0
+        pos: renderedSunPos,
+        color: starColor,
+        flareColor: flareColor,
+        size: sunSize,
+        falloff: sunFalloff
       });
+    }
+
+    // 3D moon: a textured sphere baked into the cubemap, placed at the sun's
+    // (offset) position by default. Texture priority: a user custom image
+    // (near-side photos get black -> transparent so they read as a disk),
+    // otherwise the default NASA equirectangular moon map (opaque). The
+    // rotate controls spin the actual 3D sphere — not a flat image.
+    var moonImage = params.customImage || params.moonImage || null;
+    var moonEnabled =
+      params.moonEnabled === undefined ? false : !!params.moonEnabled;
+    var moonCenter = null;
+    if (moonEnabled && moonImage) {
+      if (sunParams.length) {
+        // sunParams[0].pos is already "sun coords + offset".
+        moonCenter = sunParams[0].pos;
+      } else {
+        var randMoon = new rng.MT(hashcode(params.seed) + 4000);
+        moonCenter = randomVec3(randMoon);
+        moonCenter[0] += sunOffsetX;
+        moonCenter[1] += sunOffsetY;
+      }
+    }
+
+    // Build the moon texture once per render. Always upload from a CANVAS
+    // (never a raw <img>) — texImage2D from a canvas is reliable across the
+    // Image path. A user photo is preprocessed (black -> transparent) so it
+    // wraps as a clean disk; the default NASA map is drawn as-is. The NASA
+    // mesh maps v=0 to the north pole and its texture is north-up, so the
+    // upload is NOT flipped. Created manually (not via webgl.Texture) because
+    // that helper always generates mipmaps, which fails for NPOT images.
+    var moonTexture = null;
+    if (moonCenter) {
+      var moonTexData = params.customImage
+        ? makeMoonCanvas(params.customImage)
+        : params.moonImage
+          ? imageToCanvas(params.moonImage)
+          : null;
+      if (moonTexData) {
+        var tex = self.gl.createTexture();
+        self.gl.activeTexture(self.gl.TEXTURE0);
+        self.gl.bindTexture(self.gl.TEXTURE_2D, tex);
+        self.gl.pixelStorei(self.gl.UNPACK_FLIP_Y_WEBGL, false);
+        self.gl.texImage2D(
+          self.gl.TEXTURE_2D,
+          0,
+          self.gl.RGBA,
+          self.gl.RGBA,
+          self.gl.UNSIGNED_BYTE,
+          moonTexData
+        );
+        self.gl.texParameteri(
+          self.gl.TEXTURE_2D,
+          self.gl.TEXTURE_MIN_FILTER,
+          self.gl.LINEAR
+        );
+        self.gl.texParameteri(
+          self.gl.TEXTURE_2D,
+          self.gl.TEXTURE_MAG_FILTER,
+          self.gl.LINEAR
+        );
+        self.gl.texParameteri(
+          self.gl.TEXTURE_2D,
+          self.gl.TEXTURE_WRAP_S,
+          self.gl.CLAMP_TO_EDGE
+        );
+        self.gl.texParameteri(
+          self.gl.TEXTURE_2D,
+          self.gl.TEXTURE_WRAP_T,
+          self.gl.CLAMP_TO_EDGE
+        );
+        moonTexture = {
+          bind: function() {
+            self.gl.activeTexture(self.gl.TEXTURE0);
+            self.gl.bindTexture(self.gl.TEXTURE_2D, tex);
+          }
+        };
+      }
     }
 
     // Create a list of directions we'll be iterating over.
@@ -18610,7 +18846,9 @@ module.exports = function() {
         self.rNebula.render();
       }
 
-      // Render the suns.
+      // Render the suns. When a custom image (moon) overrides the sun, the sun
+      // is still rendered BEHIND it so its flare glows on every face; the moon
+      // image (drawn a little later) covers the sun's bright core.
       self.pSun.use();
       self.pSun.setUniform("uView", "Matrix4fv", false, view);
       self.pSun.setUniform("uProjection", "Matrix4fv", false, projection);
@@ -18619,6 +18857,7 @@ module.exports = function() {
         var sun = sunParams[j];
         self.pSun.setUniform("uPosition", "3fv", sun.pos);
         self.pSun.setUniform("uColor", "3fv", sun.color);
+        self.pSun.setUniform("uFlareColor", "3fv", sun.flareColor);
         self.pSun.setUniform("uSize", "1f", sun.size);
         self.pSun.setUniform("uFalloff", "1f", sun.falloff);
         self.pSun.setUniform(
@@ -18634,6 +18873,59 @@ module.exports = function() {
         self.rSun.render();
       }
 
+      // Render the 3D moon sphere (baked into the cubemap) at the sun's
+      // (offset) position, rotated by the moon rotate controls.
+      if (moonTexture) {
+        var moonScale =
+          params.moonScale === undefined ? 1 : parseFloat(params.moonScale);
+        var toRad = Math.PI / 180;
+        var MOON_DIST = 30;
+        var moonRadius = Math.sin(0.05 * moonScale) * MOON_DIST;
+        var dir = moonCenter.slice();
+        glm.vec3.normalize(dir, dir);
+
+        var moonModel = glm.mat4.create();
+        glm.mat4.translate(moonModel, moonModel, [
+          dir[0] * MOON_DIST,
+          dir[1] * MOON_DIST,
+          dir[2] * MOON_DIST
+        ]);
+        glm.mat4.rotateX(moonModel, moonModel, (params.moonRx || 0) * toRad);
+        glm.mat4.rotateY(moonModel, moonModel, (params.moonRy || 0) * toRad);
+        glm.mat4.rotateZ(moonModel, moonModel, (params.moonRz || 0) * toRad);
+        glm.mat4.scale(moonModel, moonModel, [
+          moonRadius,
+          moonRadius,
+          moonRadius
+        ]);
+
+        self.pMoon.use();
+        self.pMoon.setUniform("uModel", "Matrix4fv", false, moonModel);
+        self.pMoon.setUniform("uView", "Matrix4fv", false, view);
+        self.pMoon.setUniform("uProjection", "Matrix4fv", false, projection);
+        // Light the moon from the VIEWER's side (full-moon look): the visible
+        // surface normals point toward the camera (-dir), so the light must
+        // come from -dir for dot(N, L) = +1 there. Any other sign makes the
+        // lit/dark side flip and the moon render "incorrectly" at some angles.
+        self.pMoon.setUniform("uLightDir", "3fv", [
+          -dir[0],
+          -dir[1],
+          -dir[2]
+        ]);
+        self.pMoon.setUniform("uTexture", "1i", 0);
+        moonTexture.bind();
+        // The moon is a SOLID sphere, so it needs depth testing: otherwise the
+        // far (back) hemisphere's triangles get drawn over the near hemisphere
+        // (no culling/depth in this pipeline), causing "disks over disks" and
+        // the "top half rotates backwards" artifact at large rotations.
+        self.gl.enable(self.gl.DEPTH_TEST);
+        self.gl.depthMask(true);
+        self.gl.clear(self.gl.DEPTH_BUFFER_BIT);
+        self.rMoon.render();
+        self.gl.depthMask(false);
+        self.gl.disable(self.gl.DEPTH_TEST);
+      }
+
       // Create the texture.
       var c = document.createElement("canvas");
       c.width = c.height = params.resolution;
@@ -18647,6 +18939,53 @@ module.exports = function() {
 
   self.initialize();
 };
+
+// Compute the bounding box of the visible (non-black) content of an image,
+// cached on the element. Used to crop moon photos so their black margins
+// don't show as a ring around the disk.
+function getImageContentBBox(img) {
+  if (img.__contentBBox) {
+    return img.__contentBBox;
+  }
+  var iw = img.naturalWidth || img.width;
+  var ih = img.naturalHeight || img.height;
+  var x0 = iw;
+  var y0 = ih;
+  var x1 = -1;
+  var y1 = -1;
+  try {
+    var c = document.createElement("canvas");
+    c.width = iw;
+    c.height = ih;
+    var ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    var d = ctx.getImageData(0, 0, iw, ih).data;
+    for (var y = 0; y < ih; y++) {
+      for (var x = 0; x < iw; x++) {
+        var p = (y * iw + x) * 4;
+        if (d[p + 3] > 10 && (d[p] + d[p + 1] + d[p + 2]) / 3 > 12) {
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+    }
+  } catch (e) {
+    x0 = 0;
+    y0 = 0;
+    x1 = iw;
+    y1 = ih;
+  }
+  if (x1 < x0) {
+    x0 = 0;
+    y0 = 0;
+    x1 = iw;
+    y1 = ih;
+  }
+  img.__contentBBox = { x0: x0, y0: y0, x1: x1, y1: y1 };
+  return img.__contentBBox;
+}
 
 function buildStar(size, pos, dist, rand) {
   var c = Math.pow(rand.random(), 4.0);
@@ -18801,6 +19140,92 @@ function buildBox(gl, program) {
   return renderable;
 }
 
+// Smooth UV sphere (unit radius, centered at origin) used for the 3D moon.
+// Every vertex lies exactly on the sphere, so the shader's normal-from-
+// position is correct everywhere — no flipped/faceted shading like a low-poly
+// mesh. Combined with a proper 2:1 equirectangular texture, the moon rotates
+// and scales like the real one.
+function buildSphere(gl, program, rings) {
+  rings = rings || 32;
+  var slices = rings * 2;
+  var positions = [];
+  var uvs = [];
+  for (var i = 0; i <= rings; i++) {
+    var phi = (Math.PI * i) / rings;
+    var y = Math.cos(phi);
+    var r = Math.sin(phi);
+    for (var j = 0; j <= slices; j++) {
+      var theta = (2 * Math.PI * j) / slices;
+      positions.push(r * Math.cos(theta), y, r * Math.sin(theta));
+      uvs.push(j / slices, i / rings);
+    }
+  }
+  var vertsPerRow = slices + 1;
+  var indices = [];
+  for (var i2 = 0; i2 < rings; i2++) {
+    for (var j2 = 0; j2 < slices; j2++) {
+      var a = i2 * vertsPerRow + j2;
+      var b = a + vertsPerRow;
+      indices.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+  var pos = new Float32Array(indices.length * 3);
+  var uv = new Float32Array(indices.length * 2);
+  for (var k = 0; k < indices.length; k++) {
+    var v = indices[k];
+    pos[k * 3] = positions[v * 3];
+    pos[k * 3 + 1] = positions[v * 3 + 1];
+    pos[k * 3 + 2] = positions[v * 3 + 2];
+    uv[k * 2] = uvs[v * 2];
+    uv[k * 2 + 1] = uvs[v * 2 + 1];
+  }
+  var attribs = webgl.buildAttribs(gl, { aPosition: 3, aUV: 2 });
+  attribs.aPosition.buffer.set(pos);
+  attribs.aUV.buffer.set(uv);
+  var count = indices.length / 3;
+  var renderable = new webgl.Renderable(gl, program, attribs, count);
+  return renderable;
+}
+
+// Preprocess a moon image into a square canvas where near-black is
+// transparent (moon photos sit on a black background), so it can be wrapped
+// around the 3D sphere.
+function makeMoonCanvas(img) {
+  var bbox = getImageContentBBox(img);
+  var sw = bbox.x1 - bbox.x0;
+  var sh = bbox.y1 - bbox.y0;
+  var size = 512;
+  var c = document.createElement("canvas");
+  c.width = c.height = size;
+  var ctx = c.getContext("2d");
+  ctx.drawImage(img, bbox.x0, bbox.y0, sw, sh, 0, 0, size, size);
+  try {
+    var d = ctx.getImageData(0, 0, size, size);
+    var px = d.data;
+    for (var i = 0; i < px.length; i += 4) {
+      var lum = (px[i] + px[i + 1] + px[i + 2]) / 3;
+      var a = Math.max(0, Math.min(1, (lum - 8) / 50));
+      px[i + 3] = Math.round(a * 255);
+    }
+    ctx.putImageData(d, 0, 0);
+  } catch (e) {
+    // Cross-origin image without CORS: keep it opaque.
+  }
+  return c;
+}
+
+// Draw an <img> onto a canvas (same size). Texture uploads from a canvas are
+// reliable across browsers, unlike raw Image uploads.
+function imageToCanvas(img) {
+  var w = img.naturalWidth || img.width;
+  var h = img.naturalHeight || img.height;
+  var c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  c.getContext("2d").drawImage(img, 0, 0);
+  return c;
+}
+
 function quatRotBetweenVecs(a, b) {
   var theta = Math.acos(glm.vec3.dot(a, b));
   var omega = glm.vec3.create();
@@ -18840,7 +19265,345 @@ function hashcode(str) {
   return hash;
 }
 
-},{"./util.js":96,"./webgl.js":97,"gl-matrix":7,"rng":84}],96:[function(require,module,exports){
+// Rotate a color's hue by deg degrees (chroma offset). rgb is [r,g,b] 0..1.
+function hueShift(rgb, deg) {
+  var hsv = rgbToHsv(rgb);
+  hsv[0] = ((hsv[0] + deg) % 360 + 360) % 360;
+  return hsvToRgb(hsv);
+}
+
+function rgbToHsv(rgb) {
+  var r = rgb[0],
+    g = rgb[1],
+    b = rgb[2];
+  var max = Math.max(r, g, b);
+  var min = Math.min(r, g, b);
+  var d = max - min;
+  var h;
+  if (d === 0) {
+    h = 0;
+  } else if (max === r) {
+    h = ((g - b) / d) % 6;
+  } else if (max === g) {
+    h = (b - r) / d + 2;
+  } else {
+    h = (r - g) / d + 4;
+  }
+  h *= 60;
+  if (h < 0) {
+    h += 360;
+  }
+  var s = max === 0 ? 0 : d / max;
+  return [h, s, max];
+}
+
+function hsvToRgb(hsv) {
+  var h = hsv[0],
+    s = hsv[1],
+    v = hsv[2];
+  var c = v * s;
+  var x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  var m = v - c;
+  var rp, gp, bp;
+  if (h < 60) {
+    rp = c;
+    gp = x;
+    bp = 0;
+  } else if (h < 120) {
+    rp = x;
+    gp = c;
+    bp = 0;
+  } else if (h < 180) {
+    rp = 0;
+    gp = c;
+    bp = x;
+  } else if (h < 240) {
+    rp = 0;
+    gp = x;
+    bp = c;
+  } else if (h < 300) {
+    rp = x;
+    gp = 0;
+    bp = c;
+  } else {
+    rp = c;
+    gp = 0;
+    bp = x;
+  }
+  return [rp + m, gp + m, bp + m];
+}
+
+},{"./util.js":98,"./webgl.js":99,"gl-matrix":7,"rng":84}],97:[function(require,module,exports){
+// jshint -W097
+// jshint undef: true, unused: true
+/* globals module,window,document,requestAnimationFrame*/
+
+"use strict";
+
+// Sun controls (mirrors moon.js: all sun-related GUI lives here).
+// Owns the sun's brightness / size / flare, custom color, custom image
+// (toggle + URL + softness + angle), and the X/Y position offset.
+//
+// main.js calls Sun(gui, params, menu, renderTextures) and consumes:
+//   sun.queryKeys                          - keys to persist in the URL hash
+//   sun.getCustomImage(cb)                 - resolve the custom image (or null)
+//   sun.getRenderParams()                  - sun params for space.render()
+//   sun.updateImageControlsVisibility()    - show/hide image-only GUI rows
+
+// Default image used to override the procedural sun. Toggling "Custom sun
+// image" on uses this URL (or whatever is typed into the field).
+var CUSTOM_IMAGE_DEFAULT =
+  "https://www.nasa.gov/wp-content/uploads/2020/07/moon-near-side-lro.jpg";
+
+var QUERY_KEYS = [
+  "sunBrightness",
+  "sunSize",
+  "sunFlare",
+  "useSunColor",
+  "sunColor",
+  "useFlareColor",
+  "flareColor",
+  "flareHueOffset",
+  "useCustomImage",
+  "customImage",
+  "imgSoftness",
+  "imgAngle",
+  "sunOffsetX",
+  "sunOffsetY"
+];
+
+// Rows that only make sense when the custom sun image is enabled.
+var IMAGE_ROW_LABELS = [
+  "Custom sun image URL",
+  "Image edge softness",
+  "Image angle °"
+];
+
+// "#rgb" / "#rrggbb" -> [r, g, b] floats in 0..1 for the sun shader.
+function hexToRgb(hex) {
+  var h = String(hex || "").replace("#", "");
+  if (h.length === 3) {
+    h = h
+      .split("")
+      .map(function(c) {
+        return c + c;
+      })
+      .join("");
+  }
+  var num = parseInt(h, 16);
+  if (isNaN(num)) {
+    return [1, 1, 1];
+  }
+  return [
+    ((num >> 16) & 255) / 255,
+    ((num >> 8) & 255) / 255,
+    (num & 255) / 255
+  ];
+}
+
+module.exports = function(gui, params, menu, renderTextures) {
+  menu.sunBrightness =
+    params.sunBrightness === undefined ? 1.0 : parseFloat(params.sunBrightness);
+  menu.sunSize =
+    params.sunSize === undefined ? 1.0 : parseFloat(params.sunSize);
+  menu.sunFlare =
+    params.sunFlare === undefined ? 0.5 : parseFloat(params.sunFlare);
+  menu.useSunColor =
+    params.useSunColor === undefined ? false : params.useSunColor === "true";
+  menu.sunColor = params.sunColor || "#ffffff";
+  menu.useFlareColor =
+    params.useFlareColor === undefined
+      ? false
+      : params.useFlareColor === "true";
+  menu.flareColor = params.flareColor || "#ffffff";
+  menu.flareHueOffset =
+    params.flareHueOffset === undefined ? 30 : parseFloat(params.flareHueOffset);
+  menu.useCustomImage =
+    params.useCustomImage === undefined
+      ? false
+      : params.useCustomImage === "true";
+  menu.customImage = params.customImage || CUSTOM_IMAGE_DEFAULT;
+  menu.imgSoftness =
+    params.imgSoftness === undefined ? 0.0 : parseFloat(params.imgSoftness);
+  menu.imgAngle =
+    params.imgAngle === undefined ? 0.0 : parseFloat(params.imgAngle);
+  menu.sunOffsetX =
+    params.sunOffsetX === undefined ? 0.0 : parseFloat(params.sunOffsetX);
+  menu.sunOffsetY =
+    params.sunOffsetY === undefined ? 0.0 : parseFloat(params.sunOffsetY);
+
+  gui
+    .add(menu, "sunBrightness", 0, 5)
+    .name("Sun brightness")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunSize", 0.1, 8)
+    .name("Sun size")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunFlare", 0, 3)
+    .name("Sun flare")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "useSunColor")
+    .name("Custom sun color")
+    .onChange(renderTextures);
+  gui
+    .addColor(menu, "sunColor")
+    .name("Sun color")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "useFlareColor")
+    .name("Custom flare color")
+    .onChange(function() {
+      updateFlareColorVisibility();
+      renderTextures();
+    });
+  gui
+    .addColor(menu, "flareColor")
+    .name("Flare color")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "flareHueOffset", 0, 360, 1)
+    .name("Flare hue offset °")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "useCustomImage")
+    .name("Custom sun image")
+    .onChange(function() {
+      updateImageControlsVisibility();
+      renderTextures();
+    });
+  gui
+    .add(menu, "customImage")
+    .name("Custom sun image URL")
+    .onFinishChange(renderTextures);
+  gui
+    .add(menu, "imgSoftness", 0, 1)
+    .name("Image edge softness")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "imgAngle", 0, 360)
+    .name("Image angle °")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunOffsetX", -1, 1, 0.01)
+    .name("Sun offset X")
+    .onChange(renderTextures);
+  gui
+    .add(menu, "sunOffsetY", -1, 1, 0.01)
+    .name("Sun offset Y")
+    .onChange(renderTextures);
+
+  function updateImageControlsVisibility() {
+    var show = !!menu.useCustomImage;
+    Array.prototype.forEach.call(document.querySelectorAll("li"), function(li) {
+      var nameEl = li.querySelector(".property-name");
+      if (!nameEl) {
+        return;
+      }
+      if (IMAGE_ROW_LABELS.indexOf(nameEl.textContent) === -1) {
+        return;
+      }
+      li.style.display = show ? "" : "none";
+    });
+  }
+
+  // The rows only exist in the document once the GUI is appended, so defer
+  // the first pass — the image-only controls start hidden (default off).
+  requestAnimationFrame(updateImageControlsVisibility);
+
+  function updateFlareColorVisibility() {
+    var show = !!menu.useFlareColor;
+    var label = "Flare color";
+    Array.prototype.forEach.call(document.querySelectorAll("li"), function(li) {
+      var nameEl = li.querySelector(".property-name");
+      if (!nameEl) {
+        return;
+      }
+      if (nameEl.textContent === label) {
+        li.style.display = show ? "" : "none";
+      }
+    });
+  }
+
+  // The flare color picker starts hidden (flare is linked to the star color
+  // with a chroma offset by default).
+  requestAnimationFrame(updateFlareColorVisibility);
+
+  // Cache for loaded custom images (keyed by URL).
+  var imageCache = {};
+
+  function loadCustomImage(url, cb) {
+    if (!url) {
+      cb(null);
+      return;
+    }
+    if (imageCache[url]) {
+      cb(imageCache[url]);
+      return;
+    }
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function() {
+      imageCache[url] = img;
+      cb(img);
+    };
+    img.onerror = function() {
+      imageCache[url] = null;
+      cb(null);
+    };
+    img.src = url;
+  }
+
+  // Resolve the custom image (or null). When the toggle is off the sun stays
+  // procedural. If the image isn't cached yet, cb(null) fires now (procedural
+  // sun shows) then cb(img) fires once it loads.
+  function getCustomImage(cb) {
+    if (!menu.useCustomImage || !menu.customImage) {
+      cb(null);
+      return;
+    }
+    var url = menu.customImage;
+    if (imageCache[url]) {
+      cb(imageCache[url]);
+      return;
+    }
+    cb(null);
+    loadCustomImage(url, function(img) {
+      if (img) {
+        cb(img);
+      }
+    });
+  }
+
+  // Sun-related params passed straight into space.render().
+  function getRenderParams() {
+    return {
+      sunBrightness: menu.sunBrightness,
+      sunSize: menu.sunSize,
+      sunFlare: menu.sunFlare,
+      sunColor: menu.useSunColor ? hexToRgb(menu.sunColor) : null,
+      useFlareColor: menu.useFlareColor,
+      flareColor: menu.useFlareColor ? hexToRgb(menu.flareColor) : null,
+      flareHueOffset: menu.flareHueOffset,
+      imgSoftness: menu.imgSoftness,
+      imgAngle: menu.imgAngle,
+      sunOffsetX: menu.sunOffsetX,
+      sunOffsetY: menu.sunOffsetY
+    };
+  }
+
+  return {
+    queryKeys: QUERY_KEYS,
+    getCustomImage: getCustomImage,
+    getRenderParams: getRenderParams,
+    updateImageControlsVisibility: updateImageControlsVisibility,
+    updateFlareColorVisibility: updateFlareColorVisibility
+  };
+};
+
+},{}],98:[function(require,module,exports){
 (function (Buffer){
 // jshint -W097
 // jshint undef: true, unused: true
@@ -18860,7 +19623,7 @@ module.exports.loadProgram = function(gl, source) {
 };
 
 }).call(this,require("buffer").Buffer)
-},{"./webgl.js":97,"buffer":4}],97:[function(require,module,exports){
+},{"./webgl.js":99,"buffer":4}],99:[function(require,module,exports){
 
 /*...........................................................................*/
 function buildAttribs(gl, layout) {

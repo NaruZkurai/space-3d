@@ -16,7 +16,7 @@
     "budo": "^11.6.3"
   },
   "scripts": {
-    "start": "budo src/main.js:static/js/bundle.js --live -- -t brfs",
+    "start": "budo src/main.js:static/js/bundle.js --live --port 1338 -- -t brfs",
     "build": "browserify src/main.js -o static/js/bundle.js -t brfs"
   },
   "repository": {
