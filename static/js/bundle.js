@@ -18067,41 +18067,53 @@ window.onload = function() {
     autoPlace: false,
     width: 320
   });
-  gui
+
+  // Organize the GUI into collapsible folders (in display order):
+  // main -> stars -> galaxy -> sun -> moon.
+  var mainFolder = gui.addFolder("main");
+  var starsFolder = gui.addFolder("stars");
+  var galaxyFolder = gui.addFolder("galaxy");
+  var sunFolder = gui.addFolder("sun");
+  var moonFolder = gui.addFolder("moon");
+  mainFolder.open();
+
+  mainFolder
     .add(menu, "seed")
     .name("Seed")
     .listen()
     .onFinishChange(renderTextures);
-  gui.add(menu, "randomSeed").name("Randomize seed");
-  gui.add(menu, "fov", 10, 150, 1).name("Field of view °");
-  gui
-    .add(menu, "pointStars")
-    .name("Point stars")
-    .onChange(renderTextures);
-  gui
-    .add(menu, "stars")
-    .name("Bright stars")
-    .onChange(renderTextures);
-  gui
-    .add(menu, "sun")
-    .name("Sun")
-    .onChange(renderTextures);
-  gui
-    .add(menu, "nebulae")
-    .name("Nebulae")
-    .onChange(renderTextures);
-  gui
+  mainFolder.add(menu, "randomSeed").name("Randomize seed");
+  mainFolder.add(menu, "fov", 10, 150, 1).name("Field of view °");
+  mainFolder
     .add(menu, "resolution", [256, 512, 1024, 2048, 4096])
     .name("Resolution")
     .onChange(renderTextures);
-  gui.add(menu, "animationSpeed", 0, 10).name("Animation speed");
-  gui.add(menu, "saveSkybox").name("Download skybox");
+  mainFolder.add(menu, "animationSpeed", 0, 10).name("Animation speed");
+  mainFolder.add(menu, "saveSkybox").name("Download skybox");
 
-  // Moon (all logic lives in moon.js).
-  var moon = Moon(gui, params, menu, renderTextures);
+  starsFolder
+    .add(menu, "pointStars")
+    .name("Point stars")
+    .onChange(renderTextures);
+  starsFolder
+    .add(menu, "stars")
+    .name("Bright stars")
+    .onChange(renderTextures);
 
-  // Sun controls (all logic lives in sun.js).
-  var sun = Sun(gui, params, menu, renderTextures);
+  galaxyFolder
+    .add(menu, "nebulae")
+    .name("Nebulae")
+    .onChange(renderTextures);
+
+  // Moon (all logic lives in moon.js) -> moon folder.
+  var moon = Moon(moonFolder, params, menu, renderTextures);
+
+  // Sun controls (all logic lives in sun.js) -> sun folder.
+  sunFolder
+    .add(menu, "sun")
+    .name("Sun")
+    .onChange(renderTextures);
+  var sun = Sun(sunFolder, params, menu, renderTextures);
 
   // ---- Sun <-> moon coordinate helpers ----------------
   // Positions are absolute direction vectors (0,0,0 = use the seed spot).
@@ -18151,14 +18163,38 @@ window.onload = function() {
     menu.sunPosZ = m[2];
     renderTextures();
   };
-  gui.add(menu, "resetToSeed").name("Reset to seed");
-  gui.add(menu, "setSunToMoon").name("Set sun to moon");
-  gui.add(menu, "swapSunMoon").name("Swap sun / moon");
+  moonFolder.add(menu, "resetToSeed").name("Reset to seed");
+  moonFolder.add(menu, "setSunToMoon").name("Set sun to moon");
+  moonFolder.add(menu, "swapSunMoon").name("Swap sun / moon");
 
   document.body.appendChild(gui.domElement);
   gui.domElement.style.position = "fixed";
   gui.domElement.style.left = "16px";
   gui.domElement.style.top = "272px";
+
+  // Scrollable controls: when the panel grows too tall it scrolls, and the
+  // wheel scrolls infinitely (wraps around from bottom back to top and vice
+  // versa) so you never hit the end of the list.
+  gui.domElement.style.maxHeight = "75vh";
+  gui.domElement.style.overflowY = "auto";
+  gui.domElement.addEventListener(
+    "wheel",
+    function(e) {
+      var el = gui.domElement;
+      var max = el.scrollHeight - el.clientHeight;
+      if (max > 0) {
+        e.preventDefault();
+        var target = el.scrollTop + e.deltaY;
+        if (target > max) {
+          target = 0; // loop: past the bottom -> back to the top
+        } else if (target < 0) {
+          target = max; // loop: past the top -> back to the bottom
+        }
+        el.scrollTop = target;
+      }
+    },
+    { passive: false }
+  );
 
   // The GUI is in the document now, so the sun module can hide its
   // image-only rows (custom sun image is off by default).
