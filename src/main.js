@@ -135,7 +135,7 @@ window.onload = function() {
     .listen()
     .onFinishChange(renderTextures);
   mainFolder.add(menu, "randomSeed").name("Randomize seed");
-  mainFolder.add(menu, "fov", 10, 150, 1).name("Field of view °");
+  mainFolder.add(menu, "fov", 10, 150, 0.1).name("Field of view °");
   mainFolder
     .add(menu, "resolution", [256, 512, 1024, 2048, 4096])
     .name("Resolution")

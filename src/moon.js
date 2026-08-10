@@ -141,17 +141,17 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Moon scale")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRx", 0, 360, 1)
+    .add(menu, "moonRx", 0, 360, 0.01)
     .name("Moon rotate X °")
     .listen()
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRy", 0, 360, 1)
+    .add(menu, "moonRy", 0, 360, 0.01)
     .name("Moon rotate Y °")
     .listen()
     .onChange(renderTextures);
   gui
-    .add(menu, "moonRz", 0, 360, 1)
+    .add(menu, "moonRz", 0, 360, 0.01)
     .name("Moon rotate Z °")
     .listen()
     .onChange(renderTextures);
@@ -171,7 +171,7 @@ module.exports = function(gui, params, menu, renderTextures) {
       renderTextures();
     });
   gui
-    .add(menu, "moonFlareHue", 0, 360, 1)
+    .add(menu, "moonFlareHue", 0, 360, 0.1)
     .name("Moon flare hue °")
     .onChange(renderTextures);
   gui
@@ -187,7 +187,7 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Moon flare alpha (tint)")
     .onChange(renderTextures);
   gui
-    .add(menu, "moonFlareHueOffset", 0, 360, 1)
+    .add(menu, "moonFlareHueOffset", 0, 360, 0.1)
     .name("Moon flare hue offset °")
     .onChange(renderTextures);
   function updateMoonFlareVisibility() {

@@ -138,7 +138,7 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Flare color")
     .onChange(renderTextures);
   gui
-    .add(menu, "flareHueOffset", 0, 360, 1)
+    .add(menu, "flareHueOffset", 0, 360, 0.1)
     .name("Flare hue offset °")
     .onChange(renderTextures);
   gui
@@ -157,7 +157,7 @@ module.exports = function(gui, params, menu, renderTextures) {
     .name("Image edge softness")
     .onChange(renderTextures);
   gui
-    .add(menu, "imgAngle", 0, 360)
+    .add(menu, "imgAngle", 0, 360, 0.1)
     .name("Image angle °")
     .onChange(renderTextures);
   gui
