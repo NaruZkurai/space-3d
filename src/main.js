@@ -224,9 +224,8 @@ window.onload = function() {
   gui.domElement.style.left = "16px";
   gui.domElement.style.top = "272px";
 
-  // Scrollable controls: when the panel grows too tall it scrolls, and the
-  // wheel scrolls infinitely (wraps around from bottom back to top and vice
-  // versa) so you never hit the end of the list.
+  // Scrollable controls: when the panel grows too tall it scrolls (no
+  // infinite wrap-around — it simply clamps at the top and bottom).
   gui.domElement.style.maxHeight = "75vh";
   gui.domElement.style.overflowY = "auto";
   gui.domElement.addEventListener(
@@ -237,11 +236,7 @@ window.onload = function() {
       if (max > 0) {
         e.preventDefault();
         var target = el.scrollTop + e.deltaY;
-        if (target > max) {
-          target = 0; // loop: past the bottom -> back to the top
-        } else if (target < 0) {
-          target = max; // loop: past the top -> back to the bottom
-        }
+        target = Math.max(0, Math.min(max, target));
         el.scrollTop = target;
       }
     },
