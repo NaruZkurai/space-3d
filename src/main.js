@@ -15,11 +15,6 @@ var Sun = require("./sun.js");
 
 var resolution = 1024;
 
-// Default moon texture: the REAL NASA moon model's equirectangular map,
-// extracted from https://solarsystem.nasa.gov/gltf_embed/2366/ (Moon_1_3474).
-// Used for the 3D moon sphere so "Show moon" works even with no custom image.
-var MOON_IMAGE_DEFAULT = "static/img/moon.jpg";
-
 function normDeg(v) {
   return (((parseFloat(v) || 0) % 360) + 360) % 360;
 }
@@ -323,19 +318,6 @@ window.onload = function() {
   var skybox = new Skybox(renderCanvas);
   var space = new Space3D(resolution);
 
-  // Preload the default NASA moon texture. Re-render once it's ready so the
-  // moon shows up under "Show moon" even without a custom image.
-  var defaultMoonImage = null;
-  (function loadDefaultMoon() {
-    var img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = function() {
-      defaultMoonImage = img;
-      renderTextures();
-    };
-    img.src = MOON_IMAGE_DEFAULT;
-  })();
-
   // ---- Manual rotation: right-click + drag (trackball) ----
   // A quaternion camera orientation: every drag increment rotates about the
   // current screen axes, so panning up keeps panning up forever (no poles,
@@ -440,7 +422,7 @@ window.onload = function() {
       nebulae: menu.nebulae,
       resolution: menu.resolution,
       customImage: customImage,
-      moonImage: defaultMoonImage,
+      moonImage: moon.getDefaultMoonImage(),
       sunBrightness: sp.sunBrightness,
       sunSize: sp.sunSize,
       sunFlare: sp.sunFlare,

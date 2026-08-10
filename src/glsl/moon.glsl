@@ -15,7 +15,12 @@ varying vec3 worldPos;
 void main() {
     vec4 wp = uModel * vec4(aPosition, 1.0);
     gl_Position = uProjection * uView * wp;
-    uv = aUV;
+    // The moon sphere is rendered from inside the skybox (camera at the
+    // origin, looking outward), so the visible hemisphere reads the equirect
+    // texture with the u-axis reversed — the near side would appear left-right
+    // mirrored (east/Crisium on the left). Mirror u so the moon reads the way
+    // it looks from Earth: north up, east on the right.
+    uv = vec2(1.0 - aUV.x, aUV.y);
     // Surface normal (rotation + uniform scale only; translation is dropped).
     worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);
     worldPos = wp.xyz;

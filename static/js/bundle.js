@@ -17958,11 +17958,6 @@ var Sun = require("./sun.js");
 
 var resolution = 1024;
 
-// Default moon texture: the REAL NASA moon model's equirectangular map,
-// extracted from https://solarsystem.nasa.gov/gltf_embed/2366/ (Moon_1_3474).
-// Used for the 3D moon sphere so "Show moon" works even with no custom image.
-var MOON_IMAGE_DEFAULT = "static/img/moon.jpg";
-
 function normDeg(v) {
   return (((parseFloat(v) || 0) % 360) + 360) % 360;
 }
@@ -18266,19 +18261,6 @@ window.onload = function() {
   var skybox = new Skybox(renderCanvas);
   var space = new Space3D(resolution);
 
-  // Preload the default NASA moon texture. Re-render once it's ready so the
-  // moon shows up under "Show moon" even without a custom image.
-  var defaultMoonImage = null;
-  (function loadDefaultMoon() {
-    var img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = function() {
-      defaultMoonImage = img;
-      renderTextures();
-    };
-    img.src = MOON_IMAGE_DEFAULT;
-  })();
-
   // ---- Manual rotation: right-click + drag (trackball) ----
   // A quaternion camera orientation: every drag increment rotates about the
   // current screen axes, so panning up keeps panning up forever (no poles,
@@ -18383,7 +18365,7 @@ window.onload = function() {
       nebulae: menu.nebulae,
       resolution: menu.resolution,
       customImage: customImage,
-      moonImage: defaultMoonImage,
+      moonImage: moon.getDefaultMoonImage(),
       sunBrightness: sp.sunBrightness,
       sunSize: sp.sunSize,
       sunFlare: sp.sunFlare,
@@ -18486,9 +18468,16 @@ function generateRandomSeed() {
 },{"./moon.js":94,"./skybox.js":95,"./space-3d.js":96,"./sun.js":97,"filesaver.js":6,"gl-matrix":7,"jszip":22,"query-string":67}],94:[function(require,module,exports){
 // jshint -W097
 // jshint undef: true, unused: true
-/* globals module*/
+/* globals module,window,document,Image,requestAnimationFrame*/
 
 "use strict";
+
+// Default moon texture: the REAL NASA moon model's equirectangular map (2:1,
+// north-up), extracted from
+// https://solarsystem.nasa.gov/gltf_embed/2366/ (Moon_1_3474). Used for the
+// 3D moon sphere so "Show moon" works even with no custom image. Loaded here
+// so ALL moon logic lives in this one module.
+var MOON_IMAGE_DEFAULT = "static/img/moon.jpg";
 
 // Moon (3D sphere baked into the cubemap)
 // ---------------------------------------
@@ -18543,6 +18532,22 @@ function hslToRgb(h, s, l) {
 }
 
 module.exports = function(gui, params, menu, renderTextures) {
+  // Preload the default NASA moon texture. Re-render once it's ready so the
+  // moon shows up under "Show moon" even without a custom image.
+  var defaultMoonImage = null;
+  (function loadDefaultMoon() {
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function() {
+      defaultMoonImage = img;
+      renderTextures();
+    };
+    img.src = MOON_IMAGE_DEFAULT;
+  })();
+  function getDefaultMoonImage() {
+    return defaultMoonImage;
+  }
+
   menu.moonEnabled =
     params.moonEnabled === undefined ? true : params.moonEnabled === "true";
   menu.moonScale =
@@ -18737,7 +18742,8 @@ module.exports = function(gui, params, menu, renderTextures) {
 
   return {
     queryKeys: QUERY_KEYS,
-    getRenderParams: getRenderParams
+    getRenderParams: getRenderParams,
+    getDefaultMoonImage: getDefaultMoonImage
   };
 };
 
@@ -18897,7 +18903,7 @@ module.exports = function() {
     );
     self.pMoon = util.loadProgram(
       self.gl,
-      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nattribute vec2 aUV;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 wp = uModel * vec4(aPosition, 1.0);\n    gl_Position = uProjection * uView * wp;\n    uv = aUV;\n    // Surface normal (rotation + uniform scale only; translation is dropped).\n    worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);\n    worldPos = wp.xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform sampler2D uTexture;\nuniform vec3 uLightDir;\nuniform float uSoftness;\nuniform vec3 uMoonTint;\nuniform float uMoonTintAmount;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 tex = texture2D(uTexture, uv);\n    // Diffuse lighting from uLightDir (full-moon: light comes from the\n    // viewer) plus a soft ambient so the dark limb isn't pure black. This\n    // is what makes it read as the real lit 3D moon render.\n    vec3 n = normalize(worldNormal);\n    float diff = max(dot(n, normalize(uLightDir)), 0.0);\n    float shade = 0.5 + 0.5 * diff;\n    // Edge opacity: the sphere's silhouette is where N.V -> 0 (the limb).\n    // Feather alpha there so the moon's edge fades softly instead of being\n    // a hard cut. uSoftness 0 = crisp edge, 3 = very soft.\n    vec3 v = normalize(-worldPos);\n    float ndv = max(dot(n, v), 0.0);\n    float feather = uSoftness * 0.25;\n    float edge = smoothstep(0.0, feather, ndv);\n    // Moon color follows the sun's final color, scaled by the flare alpha.\n    vec3 tinted = mix(tex.rgb, uMoonTint, uMoonTintAmount);\n    gl_FragColor = vec4(tinted * shade, tex.a * edge);\n}\n"
+      "#version 100\nprecision highp float;\n\nuniform mat4 uModel;\nuniform mat4 uView;\nuniform mat4 uProjection;\n\nattribute vec3 aPosition;\nattribute vec2 aUV;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 wp = uModel * vec4(aPosition, 1.0);\n    gl_Position = uProjection * uView * wp;\n    // The moon sphere is rendered from inside the skybox (camera at the\n    // origin, looking outward), so the visible hemisphere reads the equirect\n    // texture with the u-axis reversed — the near side would appear left-right\n    // mirrored (east/Crisium on the left). Mirror u so the moon reads the way\n    // it looks from Earth: north up, east on the right.\n    uv = vec2(1.0 - aUV.x, aUV.y);\n    // Surface normal (rotation + uniform scale only; translation is dropped).\n    worldNormal = normalize((uModel * vec4(aPosition, 0.0)).xyz);\n    worldPos = wp.xyz;\n}\n\n\n__split__\n\n\n#version 100\nprecision highp float;\n\nuniform sampler2D uTexture;\nuniform vec3 uLightDir;\nuniform float uSoftness;\nuniform vec3 uMoonTint;\nuniform float uMoonTintAmount;\n\nvarying vec2 uv;\nvarying vec3 worldNormal;\nvarying vec3 worldPos;\n\nvoid main() {\n    vec4 tex = texture2D(uTexture, uv);\n    // Diffuse lighting from uLightDir (full-moon: light comes from the\n    // viewer) plus a soft ambient so the dark limb isn't pure black. This\n    // is what makes it read as the real lit 3D moon render.\n    vec3 n = normalize(worldNormal);\n    float diff = max(dot(n, normalize(uLightDir)), 0.0);\n    float shade = 0.5 + 0.5 * diff;\n    // Edge opacity: the sphere's silhouette is where N.V -> 0 (the limb).\n    // Feather alpha there so the moon's edge fades softly instead of being\n    // a hard cut. uSoftness 0 = crisp edge, 3 = very soft.\n    vec3 v = normalize(-worldPos);\n    float ndv = max(dot(n, v), 0.0);\n    float feather = uSoftness * 0.25;\n    float edge = smoothstep(0.0, feather, ndv);\n    // Moon color follows the sun's final color, scaled by the flare alpha.\n    vec3 tinted = mix(tex.rgb, uMoonTint, uMoonTintAmount);\n    gl_FragColor = vec4(tinted * shade, tex.a * edge);\n}\n"
     );
 
     // Create the point stars renderable.

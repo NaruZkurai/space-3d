@@ -1,8 +1,15 @@
 // jshint -W097
 // jshint undef: true, unused: true
-/* globals module*/
+/* globals module,window,document,Image,requestAnimationFrame*/
 
 "use strict";
+
+// Default moon texture: the REAL NASA moon model's equirectangular map (2:1,
+// north-up), extracted from
+// https://solarsystem.nasa.gov/gltf_embed/2366/ (Moon_1_3474). Used for the
+// 3D moon sphere so "Show moon" works even with no custom image. Loaded here
+// so ALL moon logic lives in this one module.
+var MOON_IMAGE_DEFAULT = "static/img/moon.jpg";
 
 // Moon (3D sphere baked into the cubemap)
 // ---------------------------------------
@@ -57,6 +64,22 @@ function hslToRgb(h, s, l) {
 }
 
 module.exports = function(gui, params, menu, renderTextures) {
+  // Preload the default NASA moon texture. Re-render once it's ready so the
+  // moon shows up under "Show moon" even without a custom image.
+  var defaultMoonImage = null;
+  (function loadDefaultMoon() {
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function() {
+      defaultMoonImage = img;
+      renderTextures();
+    };
+    img.src = MOON_IMAGE_DEFAULT;
+  })();
+  function getDefaultMoonImage() {
+    return defaultMoonImage;
+  }
+
   menu.moonEnabled =
     params.moonEnabled === undefined ? true : params.moonEnabled === "true";
   menu.moonScale =
@@ -251,6 +274,7 @@ module.exports = function(gui, params, menu, renderTextures) {
 
   return {
     queryKeys: QUERY_KEYS,
-    getRenderParams: getRenderParams
+    getRenderParams: getRenderParams,
+    getDefaultMoonImage: getDefaultMoonImage
   };
 };
